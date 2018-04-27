@@ -126,7 +126,7 @@ def plot_1d(generated, data_raw, it):
         ax_marg_y.set_xlabel('Marginal: income')
         ax_marg_x.set_ylabel('Marginal: height')
 
-        plt.savefig('cgan_out/{}.png'.format(it))
+        plt.savefig('iwgan_out/{}.png'.format(it))
         plt.close()
 
         # Also plot heatmap.
@@ -134,7 +134,7 @@ def plot_1d(generated, data_raw, it):
         plt.imshow(vals_on_grid, interpolation='nearest', aspect='equal',
             extent=[grid1.min(), grid1.max(), grid2.min(), grid2.max()])
         plt.colorbar()
-        plt.savefig('cgan_out/heatmap.png')
+        plt.savefig('iwgan_out/heatmap.png')
         plt.close()
 
 
@@ -208,8 +208,7 @@ def dense(x, width, activation, batch_residual=False):
         return layers.batch_normalization(x_) + x
 
 
-def discriminator(x, y, reuse=False):
-    inputs = tf.concat(axis=1, values=[x, y])
+def discriminator(inputs, reuse=False):
     with tf.variable_scope('discriminator', reuse=reuse) as d_vs:
         layer = dense(inputs, h_dim, activation=tf.nn.elu)
         layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
@@ -219,12 +218,12 @@ def discriminator(x, y, reuse=False):
     return d_prob, d_logit, d_vars 
 
 
-def generator(z, x, reuse=False):
-    inputs = tf.concat(axis=1, values=[z, x])
+def generator(z, reuse=False):
+    #inputs = tf.concat(axis=1, values=[z, x])
     with tf.variable_scope('generator', reuse=reuse) as g_vs:
-        layer = dense(inputs, h_dim, activation=tf.nn.elu)
+        layer = dense(z, h_dim, activation=tf.nn.elu)
         layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
-        g = dense(layer, y_dim, activation=None)
+        g = dense(layer, x_dim + y_dim, activation=None)  # Outputing xy pairs.
     g_vars = tf.contrib.framework.get_variables(g_vs)
     return g, g_vars
 
@@ -233,28 +232,27 @@ def get_sample_z(m, n):
     return np.random.normal(0., 1., size=[m, n])
 
 
-def thinning_fn(inputs, is_tf=True): 
+def thinning_fn(inputs):
     """In 2D case, thinning based on x only. Inputs is a vector of x values."""
-    if is_tf:
-        return 0.99 / (1. + tf.exp(-0.95 * (inputs - 3.))) + 0.01
-    else:
-        return 0.99 / (1. + np.exp(-0.95 * (inputs - 3.))) + 0.01
+    return 0.99 / (1. + tf.exp(-0.95 * (inputs - 3.))) + 0.01
 
 
 # Beginning of graph.
 z = tf.placeholder(tf.float32, shape=[None, z_dim], name='z')
 x = tf.placeholder(tf.float32, shape=[None, x_dim], name='x')
 y = tf.placeholder(tf.float32, shape=[None, y_dim], name='y')
+real = tf.concat([x, y], axis=1)
 
-g, g_vars = generator(z, x, reuse=False)
-d_real, d_logit_real, d_vars = discriminator(x, y, reuse=False)
-d_fake, d_logit_fake, _ = discriminator(x, g, reuse=True)
+g, g_vars = generator(z, reuse=False)
+d_real, d_logit_real, d_vars = discriminator(real, reuse=False)
+d_fake, d_logit_fake, _ = discriminator(g, reuse=True)
 
 errors_real = sigmoid_cross_entropy_with_logits(d_logit_real,
     tf.ones_like(d_logit_real))
 errors_fake = sigmoid_cross_entropy_with_logits(d_logit_fake,
     tf.zeros_like(d_logit_fake))
-d_loss_real = tf.reduce_mean(errors_real)
+weights_x = 1. / thinning_fn(x)
+d_loss_real = tf.reduce_mean(weights_x * errors_real)
 d_loss_fake = tf.reduce_mean(errors_fake)
 
 # Assemble losses.
@@ -265,7 +263,7 @@ g_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
 # Set optim nodes.
 clip = 0
 if clip:
-    d_opt = tf.train.AdamOptimizer(learning_rate=1e-3)
+    d_opt = tf.train.AdamOptimizer(learning_rate=1e-4)
     d_grads_, d_vars_ = zip(*d_opt.compute_gradients(d_loss, var_list=d_vars))
     d_grads_clipped_ = tuple(
         [tf.clip_by_value(grad, -0.01, 0.01) for grad in d_grads_])
@@ -292,8 +290,8 @@ sess.run(tf.global_variables_initializer())
 
 log_iter = 2000
 
-if not os.path.exists('cgan_out/'):
-    os.makedirs('cgan_out/')
+if not os.path.exists('iwgan_out/'):
+    os.makedirs('iwgan_out/')
 
 # train()
 for it in range(50000):
@@ -323,26 +321,10 @@ for it in range(50000):
         print('  d_loss: {:.4}'.format(d_loss_))
         print('  g_loss: {:.4}'.format(g_loss_))
 
-        n_sample = 5000
+        n_sample = 1000
         z_sample = get_sample_z(n_sample, z_dim)
-
-        #x_sample_unnormalized = np.reshape(np.random.uniform(1, 6, n_sample), [-1, 1])
-        #x_sample = (x_sample_unnormalized - data_raw_mean[0]) / data_raw_std[0]
-        latent_ = np.random.gamma(4., 8., n_sample)
-        v1_ = np.zeros(shape=(n_sample, 1))  # Height
-        for i in range(n_sample):
-            v1_mean_ = -0.00003 * np.exp(-1.0 * (0.13 * latent_[i] - 12)) + 5.5
-            v1_[i] = np.random.normal(v1_mean_, 0.1)  # Height
-        x_sample_unnormalized = v1_
-        x_sample = (x_sample_unnormalized - data_raw_mean[0]) / data_raw_std[0]
-        #x_sample = [candidate for candidate in x_sample if
-        #    np.random.binomial(1, thinning_fn(candidate, is_tf=False))]
-        
-        # TODO: Figure out how I'm supposed to sample from P, given marginal of x on TP, and T(x).
-
-        g_out = sess.run(g, feed_dict={z: z_sample[:len(x_sample)], x: x_sample})
-        generated_normed = np.hstack((x_sample, g_out))
-        generated = np.array(generated_normed) * data_raw_std[:2] + data_raw_mean[:2]
+        g_out = sess.run(g, feed_dict={z: z_sample})
+        generated = np.array(g_out) * data_raw_std[:2] + data_raw_mean[:2]
 
         # Print diagnostics.
         print(data_raw[np.random.choice(data_num, 5), :])
@@ -352,3 +334,18 @@ for it in range(50000):
         #fig = plot_2d([p[0] for p in g_out], [p[1] for p in g_out], data,
         #    save_name='out/{}.png'.format(str(it)))
         fig = plot_1d(generated, data_raw, it)
+
+        # Diagnostics for thinning_fn.
+        thin_diag = 0
+        if thin_diag:
+            errors_real_, weights_x_, d_loss_real_ = sess.run(
+                [errors_real, weights_x, d_loss_real],
+                feed_dict={
+                    x: x_batch[:5],
+                    y: y_batch[:5]})
+            print
+            print(x_batch[:5] * data_raw_std[0] + data_raw_mean[0])
+            print(errors_real_)
+            print(weights_x_)
+            print(d_loss_real_)
+            pdb.set_trace()
