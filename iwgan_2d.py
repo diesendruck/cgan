@@ -3,6 +3,8 @@ import tensorflow as tf
 layers = tf.layers
 from tensorflow.examples.tutorials.mnist import input_data
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import os
 import pdb
@@ -21,12 +23,12 @@ tag = args.tag
 weighted = args.weighted
 do_p = args.do_p
 data_num = 10000
-mb_size = 64 
-z_dim = 5  # Latent (Age)
+batch_size = 1024 
+z_dim = 10  # Latent (Age)
 x_dim = 1  # Label (Height)
 y_dim = 1  # Data (Income)
 h_dim = 5
-learning_rate = 1e-3
+learning_rate = 1e-4
 log_iter = 1000
 log_dir = 'iwgan_out_{}'.format(tag)
 
@@ -34,9 +36,9 @@ log_dir = 'iwgan_out_{}'.format(tag)
 def thinning_fn(inputs, is_tf=True):
     """Thinning on x only (height). Inputs is a vector of x values."""
     if is_tf:
-        return 0.99 / (1. + tf.exp(-0.95 * (inputs - 3.))) + 0.01
+        return 0.9 / (1. + tf.exp(-0.95 * (inputs - 3.))) + 0.1
     else:
-        return 0.99 / (1. + np.exp(-0.95 * (inputs - 3.))) + 0.01
+        return 0.9 / (1. + np.exp(-0.95 * (inputs - 3.))) + 0.1
 
 
 def generate_data(n):
@@ -50,7 +52,8 @@ def generate_data(n):
 
     def gen_from_angled_bar():
         v1 = np.random.uniform(0., 6)
-        v2 = np.random.normal(0., 2. - v1 / 3.)
+        #v2 = np.random.normal(0., 2. - v1 / 3.)
+        v2 = np.random.normal(0.,  v1 / 6.)
         out = np.reshape([v1, v2], [1, -1])
         return out
 
@@ -65,6 +68,7 @@ def generate_data(n):
         return out
 
     sampling_fn = gen_from_angled_bar
+    #sampling_fn = gen_from_horseshoe
 
     data_raw_unthinned = np.zeros((n, 2))
     data_raw = sampling_fn()
@@ -81,12 +85,15 @@ def generate_data(n):
     return data_normed, data_raw, data_raw_mean, data_raw_std, data_raw_unthinned
 
 
-def sample_data(data, batch_size):
+def sample_data(data, batch_size, weighted=weighted):
     assert data.shape[1] == 2, 'data shape not 2'
     idxs = np.random.choice(data_num, batch_size)
     batch_x = np.reshape(data[idxs, 0], [-1, 1])
     batch_y = np.reshape(data[idxs, 1], [-1, 1])
-    return batch_x, batch_y
+    weights = None
+    if weighted:
+        weights = global_weights[idxs]
+    return batch_x, batch_y, weights
 
 
 def sigmoid_cross_entropy_with_logits(logits, labels):
@@ -143,12 +150,12 @@ def plot(generated, data_raw, data_raw_unthinned, it):
     plt.setp(ax_marg_y.get_yticklabels(), visible=False)
 
     # Set labels on joint
-    ax_joint.set_xlabel('Joint: height (ft)')
-    ax_joint.set_ylabel('Joint: income ($)')
+    #ax_joint.set_xlabel('Joint: height (ft)')
+    #ax_joint.set_ylabel('Joint: income ($)')
 
     # Set labels on marginals
-    ax_marg_y.set_xlabel('Marginal: income')
-    ax_marg_x.set_ylabel('Marginal: height')
+    #ax_marg_y.set_xlabel('Marginal: income')
+    #ax_marg_x.set_ylabel('Marginal: height')
 
     ########
     # EVEN MORE PLOTTING.
@@ -183,7 +190,7 @@ def get_sample_z(m, n):
 def run_discrim(x_in, y_in):
     x_in = np.reshape(x_in, [-1, 1])
     y_in = np.reshape(y_in, [-1, 1])
-    return sess.run(d_real, feed_dict={x: x_in, y: y_in}) 
+    return sess.run(d_real_sample, feed_dict={x_sample: x_in, y_sample: y_in}) 
 
 
 def to_raw(d, index=None):
@@ -216,6 +223,8 @@ def discriminator(inputs, reuse=False):
         layer = dense(inputs, h_dim, activation=tf.nn.elu)
         layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
         layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
+        layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
+        layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
         d_logit = dense(layer, 1, activation=None)
         d_prob = tf.nn.sigmoid(d_logit)
     d_vars = tf.contrib.framework.get_variables(d_vs)
@@ -228,20 +237,31 @@ def generator(z, reuse=False):
         layer = dense(z, h_dim, activation=tf.nn.elu)
         layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
         layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
+        layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
+        layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
         g = dense(layer, x_dim + y_dim, activation=None)  # Outputing xy pairs.
     g_vars = tf.contrib.framework.get_variables(g_vs)
     return g, g_vars
 
 
 # Beginning of graph.
-z = tf.placeholder(tf.float32, shape=[None, z_dim], name='z')
-x = tf.placeholder(tf.float32, shape=[None, x_dim], name='x')
-y = tf.placeholder(tf.float32, shape=[None, y_dim], name='y')
+z = tf.placeholder(tf.float32, shape=[batch_size, z_dim], name='z')
+w = tf.placeholder(tf.float32, shape=[batch_size, 1], name='weights')
+x = tf.placeholder(tf.float32, shape=[batch_size, x_dim], name='x')
+y = tf.placeholder(tf.float32, shape=[batch_size, y_dim], name='y')
 real = tf.concat([x, y], axis=1)
 
 g, g_vars = generator(z, reuse=False)
 d_real, d_logit_real, d_vars = discriminator(real, reuse=False)
 d_fake, d_logit_fake, _ = discriminator(g, reuse=True)
+
+# Separate callable nodes for arbitrarily sized inputs.
+z_sample = tf.placeholder(tf.float32, shape=[None, z_dim], name='z_sample')
+x_sample = tf.placeholder(tf.float32, shape=[None, x_dim], name='x_sample')
+y_sample = tf.placeholder(tf.float32, shape=[None, y_dim], name='y_sample')
+real_sample = tf.concat([x_sample, y_sample], axis=1)
+g_sample, _ = generator(z_sample, reuse=True)
+d_real_sample, _, _ = discriminator(real_sample, reuse=True)
 
 # Define losses.
 errors_real = sigmoid_cross_entropy_with_logits(d_logit_real,
@@ -249,8 +269,12 @@ errors_real = sigmoid_cross_entropy_with_logits(d_logit_real,
 errors_fake = sigmoid_cross_entropy_with_logits(d_logit_fake,
     tf.zeros_like(d_logit_fake))
 if weighted:
-    weights_x = 1. / thinning_fn(x)
-    d_loss_real = tf.reduce_mean(weights_x * errors_real)
+    #weights_x = 1. / thinning_fn(x)
+    #weights_x_sum_normalized = weights_x / tf.reduce_sum(weights_x)
+    # TODO: Sum or Mean?
+    #d_loss_real = tf.reduce_mean(weights_x_sum_normalized * errors_real)
+    d_loss_real = tf.reduce_mean(w * errors_real)
+    #d_loss_real = tf.reduce_sum(weights_x_sum_normalized * errors_real)
 else:
     d_loss_real = tf.reduce_mean(errors_real)
 d_loss_fake = tf.reduce_mean(errors_fake)
@@ -283,6 +307,13 @@ if do_p:
     data_normed = to_normed(data_raw_unthinned)
     data_raw = data_raw_unthinned
 
+# Compute global approximation of weights (1/~T(x)).
+global_weights = []
+for v in data_normed:
+    global_weights.append(1. / thinning_fn(to_raw(v)[0], is_tf=False))
+global_weights = np.reshape(np.array(
+    global_weights * data_num / np.sum(global_weights)), [-1, 1])
+
 # Start session.
 sess = tf.Session()
 sess.run(tf.global_variables_initializer())
@@ -292,23 +323,42 @@ if not os.path.exists(log_dir):
 
 # train()
 for it in range(500000):
-    x_batch, y_batch = sample_data(data_normed, mb_size)
-    z_batch = get_sample_z(mb_size, z_dim)
+    x_batch, y_batch, weights_batch = sample_data(
+        data_normed, batch_size, weighted=weighted)
+    z_batch = get_sample_z(batch_size, z_dim)
 
-    for _ in range(5):
-        _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
-                [d_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
-            feed_dict={
-                x: x_batch,
-                z: z_batch,
-                y: y_batch})
-    for _ in range(1):
-        _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
-                [g_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
-            feed_dict={
-                x: x_batch,
-                z: z_batch,
-                y: y_batch})
+    if weighted:
+        for _ in range(5):
+            _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
+                    [d_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
+                feed_dict={
+                    x: x_batch,
+                    z: z_batch,
+                    y: y_batch,
+                    w: weights_batch})
+        for _ in range(1):
+            _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
+                    [g_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
+                feed_dict={
+                    x: x_batch,
+                    z: z_batch,
+                    y: y_batch,
+                    w: weights_batch})
+    else:
+        for _ in range(5):
+            _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
+                    [d_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
+                feed_dict={
+                    x: x_batch,
+                    z: z_batch,
+                    y: y_batch})
+        for _ in range(1):
+            _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
+                    [g_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
+                feed_dict={
+                    x: x_batch,
+                    z: z_batch,
+                    y: y_batch})
 
     if it % log_iter == 0:
         print("#################")
@@ -319,8 +369,8 @@ for it in range(500000):
         print('  g_loss: {:.4}'.format(g_loss_))
 
         n_sample = 1000
-        z_sample = get_sample_z(n_sample, z_dim)
-        g_out = sess.run(g, feed_dict={z: z_sample})
+        z_sample_input = get_sample_z(n_sample, z_dim)
+        g_out = sess.run(g_sample, feed_dict={z_sample: z_sample_input})
         generated = np.array(g_out) * data_raw_std[:2] + data_raw_mean[:2]
 
         # Print diagnostics.
