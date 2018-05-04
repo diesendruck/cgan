@@ -23,11 +23,11 @@ tag = args.tag
 weighted = args.weighted
 do_p = args.do_p
 data_num = 10000
-batch_size = 64
+batch_size = 256 
 z_dim = 5
 x_dim = 1
 h_dim = 3
-learning_rate = 1e-2
+learning_rate = 1e-3
 log_iter = 1000
 log_dir = 'mmdgan1d_out_{}'.format(tag)
 

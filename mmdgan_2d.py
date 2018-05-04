@@ -23,8 +23,8 @@ tag = args.tag
 weighted = args.weighted
 do_p = args.do_p
 data_num = 10000
-batch_size = 256 
-z_dim = 5  # Latent (Age)
+batch_size = 64 
+z_dim = 10  # Latent (Age)
 x_dim = 1  # Label (Height)
 y_dim = 1  # Data (Income)
 h_dim = 5
@@ -44,8 +44,8 @@ def generate_data(n):
 
     def gen_from_angled_bar():
         v1 = np.random.uniform(0., 6)
-        v2 = np.random.normal(0., 2. - v1 / 3.)
-        #v2 = np.random.normal(0.,  v1 / 6.)
+        #v2 = np.random.normal(0., 2. - v1 / 3.)
+        v2 = np.random.normal(0.,  v1 / 6.)
         out = np.reshape([v1, v2], [1, -1])
         return out
 
@@ -107,9 +107,13 @@ def sigmoid_cross_entropy_with_logits(logits, labels):
         return tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, targets=labels)
 
 
-def plot(generated, data_raw, it):
+def plot(generated, data_raw, data_raw_unthinned, it):
     gen_v1 = generated[:, 0] 
     gen_v2 = generated[:, 1] 
+    raw_v1 = [d[0] for d in data_raw]
+    raw_v2 = [d[1] for d in data_raw]
+    raw_unthinned_v1 = [d[0] for d in data_raw_unthinned]
+    raw_unthinned_v2 = [d[1] for d in data_raw_unthinned]
 
     # Will use normalized data for evaluation of D.
     data_normed = to_normed(data_raw)
@@ -119,18 +123,18 @@ def plot(generated, data_raw, it):
     grid1 = np.linspace(min(data_raw[:, 0]), max(data_raw[:, 0]), grid_gran)
 
     fig = plt.figure()
-    gs = GridSpec(4, 4)
+    gs = GridSpec(8, 4)
     ax_joint = fig.add_subplot(gs[1:4, 0:3])
     ax_marg_x = fig.add_subplot(gs[0, 0:3], sharex=ax_joint)
     ax_marg_y = fig.add_subplot(gs[1:4, 3], sharey=ax_joint)
 
-    raw_v1 = [d[0] for d in data_raw]
-    raw_v2 = [d[1] for d in data_raw]
     ax_joint.scatter(raw_v1, raw_v2, c='gray', alpha=0.3)
     ax_joint.scatter(gen_v1, gen_v2, alpha=0.3)
     ax_joint.set_aspect('auto')
+
     ax_thinning = ax_joint.twinx()
     ax_thinning.plot(grid1, thinning_fn(grid1, is_tf=False), color='red', alpha=0.3)
+
     ax_marg_x.hist([raw_v1, gen_v1], bins=30, color=['gray', 'blue'],
         label=['d', 'g'], alpha=0.3, normed=True)
     ax_marg_y.hist([raw_v2, gen_v2], bins=30, color=['gray', 'blue'],
@@ -142,13 +146,19 @@ def plot(generated, data_raw, it):
     plt.setp(ax_marg_x.get_xticklabels(), visible=False)
     plt.setp(ax_marg_y.get_yticklabels(), visible=False)
 
-    # Set labels on joint
-    ax_joint.set_xlabel('Joint: height (ft)')
-    ax_joint.set_ylabel('Joint: income ($)')
-
-    # Set labels on marginals
-    ax_marg_y.set_xlabel('Marginal: income')
-    ax_marg_x.set_ylabel('Marginal: height')
+    ########
+    # EVEN MORE PLOTTING.
+    ax_raw = fig.add_subplot(gs[5:8, 0:3], sharex=ax_joint)
+    ax_raw_marg_x = fig.add_subplot(gs[4, 0:3], sharex=ax_raw)
+    ax_raw_marg_y = fig.add_subplot(gs[5:8, 3], sharey=ax_raw)
+    ax_raw.scatter(raw_unthinned_v1, raw_unthinned_v2, c='gray', alpha=0.1)
+    ax_raw_marg_x.hist(raw_unthinned_v1, bins=30, color='gray',
+        label='d', alpha=0.3, normed=True)
+    ax_raw_marg_y.hist(raw_unthinned_v2, bins=30, color='gray',
+        label='d', orientation="horizontal", alpha=0.3, normed=True)
+    plt.setp(ax_raw_marg_x.get_xticklabels(), visible=False)
+    plt.setp(ax_raw_marg_y.get_yticklabels(), visible=False)
+    ########
 
     plt.savefig('{}/{}.png'.format(log_dir, it))
     plt.close()
@@ -274,39 +284,11 @@ d_fake, d_logit_fake, _ = discriminator(g, reuse=True)
 
 # Define losses.
 mmd = compute_mmd(real, g, weighted=weighted)
-errors_real = sigmoid_cross_entropy_with_logits(d_logit_real,
-    tf.ones_like(d_logit_real))
-errors_fake = sigmoid_cross_entropy_with_logits(d_logit_fake,
-    tf.zeros_like(d_logit_fake))
-if weighted:
-    x_unnormed = x * data_raw_std[0] + data_raw_mean[0]
-    weights_x = 1. / thinning_fn(x_unnormed)
-    weights_x_sum_normalized = weights_x / tf.reduce_sum(weights_x)
-    d_loss_real = tf.reduce_sum(weights_x_sum_normalized * errors_real)
-else:
-    d_loss_real = tf.reduce_mean(errors_real)
-d_loss_fake = tf.reduce_mean(errors_fake)
-
-
-# Assemble final losses.
-#d_loss = d_loss_real + d_loss_fake
-#g_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-#    logits=d_logit_fake, labels=tf.ones_like(d_logit_fake)))
 g_loss = mmd
 
-# Set optim nodes.
-#clip = 0
-#if clip:
-#    d_opt = tf.train.AdamOptimizer(learning_rate=1e-4)
-#    d_grads_, d_vars_ = zip(*d_opt.compute_gradients(d_loss, var_list=d_vars))
-#    d_grads_clipped_ = tuple(
-#        [tf.clip_by_value(grad, -0.01, 0.01) for grad in d_grads_])
-#    d_optim = d_opt.apply_gradients(zip(d_grads_clipped_, d_vars_))
-#else:
-#    d_optim = tf.train.AdamOptimizer(learning_rate=1e-4).minimize(
-#        d_loss, var_list=d_vars)
-g_optim = tf.train.AdamOptimizer(learning_rate=lr).minimize(
+g_optim = tf.train.RMSPropOptimizer(learning_rate=lr).minimize(
     g_loss, var_list=g_vars)
+
 # End: Build model.
 ################################################################################
 
@@ -323,20 +305,6 @@ for it in range(500000):
     x_batch, y_batch = sample_data(data_normed, batch_size)
     z_batch = get_sample_z(batch_size, z_dim)
 
-    #for _ in range(5):
-    #    _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
-    #            [d_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
-    #        feed_dict={
-    #            x: x_batch,
-    #            z: z_batch,
-    #            y: y_batch})
-    #for _ in range(1):
-    #    _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
-    #            [g_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
-    #        feed_dict={
-    #            x: x_batch,
-    #            z: z_batch,
-    #            y: y_batch})
     _, g_loss_ = sess.run(
             [g_optim, g_loss],
         feed_dict={
@@ -351,12 +319,9 @@ for it in range(500000):
         print("#################")
         lr_ = sess.run(lr)
         print('Iter: {}, lr={:.4f}'.format(it, lr_))
-        #print('  d_logit_real: {}'.format(d_logit_real_[:5]))
-        #print('  d_logit_fake: {}'.format(d_logit_fake_[:5]))
-        #print('  d_loss: {:.4}'.format(d_loss_))
         print('  g_loss: {:.4}'.format(g_loss_))
 
-        n_sample = 1000 
+        n_sample = 10000 
         z_sample_input = get_sample_z(n_sample, z_dim)
         g_out = sess.run(g_sample, feed_dict={z_sample: z_sample_input})
         generated = np.array(g_out) * data_raw_std[:2] + data_raw_mean[:2]
@@ -366,7 +331,7 @@ for it in range(500000):
         print
         print(generated[:5])
 
-        fig = plot(generated, data_raw, it)
+        fig = plot(generated, data_raw, data_raw_unthinned, it)
 
         # Diagnostics for thinning_fn.
         thin_diag = 0

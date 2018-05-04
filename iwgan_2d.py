@@ -23,12 +23,12 @@ tag = args.tag
 weighted = args.weighted
 do_p = args.do_p
 data_num = 10000
-batch_size = 128 
+batch_size = 512 
 z_dim = 10  # Latent (Age)
 x_dim = 1  # Label (Height)
 y_dim = 1  # Data (Income)
 h_dim = 5
-learning_rate = 5e-3
+learning_rate = 1e-3
 log_iter = 1000
 log_dir = 'iwgan_out_{}'.format(tag)
 
@@ -60,7 +60,6 @@ def generate_data(n):
         return out
 
     sampling_fn = gen_from_angled_bar
-    #sampling_fn = gen_from_horseshoe
 
     data_raw_unthinned = np.zeros((n, 2))
     data_raw = sampling_fn()
@@ -119,9 +118,6 @@ def plot(generated, data_raw, data_raw_unthinned, it):
     raw_unthinned_v1 = [d[0] for d in data_raw_unthinned]
     raw_unthinned_v2 = [d[1] for d in data_raw_unthinned]
 
-    # Will use normalized data for evaluation of D.
-    data_normed = to_normed(data_raw)
-
     # Evaluate D on grid.
     grid_gran = 20
     grid_x = np.linspace(min(data_raw[:, 0]), max(data_raw[:, 0]), grid_gran)
@@ -157,14 +153,6 @@ def plot(generated, data_raw, data_raw_unthinned, it):
     plt.setp(ax_marg_x.get_xticklabels(), visible=False)
     plt.setp(ax_marg_y.get_yticklabels(), visible=False)
 
-    # Set labels on joint
-    #ax_joint.set_xlabel('Joint: height (ft)')
-    #ax_joint.set_ylabel('Joint: income ($)')
-
-    # Set labels on marginals
-    #ax_marg_y.set_xlabel('Marginal: income')
-    #ax_marg_x.set_ylabel('Marginal: height')
-
     ########
     # EVEN MORE PLOTTING.
     ax_raw = fig.add_subplot(gs[5:8, 0:3], sharex=ax_joint)
@@ -181,14 +169,6 @@ def plot(generated, data_raw, data_raw_unthinned, it):
 
     plt.savefig('{}/{}.png'.format(log_dir, it))
     plt.close()
-
-    # Also plot heatmap.
-    #plt.figure()
-    #plt.imshow(vals_on_grid, interpolation='nearest', aspect='equal', origin='lower',
-    #    extent=[grid_x.min(), grid_x.max(), grid_y.min(), grid_y.max()])
-    #plt.colorbar()
-    #plt.savefig('{}/heatmap.png'.format(log_dir))
-    #plt.close()
 
 
 def get_sample_z(m, n):
@@ -294,15 +274,15 @@ g_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
 # Set optim nodes.
 clip = 0
 if clip:
-    d_opt = tf.train.AdamOptimizer(learning_rate=learning_rate)
+    d_opt = tf.train.RMSPropOptimizer(learning_rate=learning_rate)
     d_grads_, d_vars_ = zip(*d_opt.compute_gradients(d_loss, var_list=d_vars))
     d_grads_clipped_ = tuple(
         [tf.clip_by_value(grad, -0.01, 0.01) for grad in d_grads_])
     d_optim = d_opt.apply_gradients(zip(d_grads_clipped_, d_vars_))
 else:
-    d_optim = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(
+    d_optim = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(
         d_loss, var_list=d_vars)
-g_optim = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(
+g_optim = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(
     g_loss, var_list=g_vars)
 # End: Build model.
 ################################################################################
@@ -355,7 +335,7 @@ for it in range(500000):
         print('  d_loss: {:.4}'.format(d_loss_))
         print('  g_loss: {:.4}'.format(g_loss_))
 
-        n_sample = 1000
+        n_sample = 10000
         z_sample_input = get_sample_z(n_sample, z_dim)
         g_out = sess.run(g_sample, feed_dict={z_sample: z_sample_input})
         generated = np.array(g_out) * data_raw_std[:2] + data_raw_mean[:2]

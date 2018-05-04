@@ -8,7 +8,6 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import os
 import pdb
-import seaborn as sns
 from matplotlib.gridspec import GridSpec
 
 
@@ -23,11 +22,11 @@ tag = args.tag
 weighted = args.weighted
 do_p = args.do_p
 data_num = 10000
-batch_size = 128 
+batch_size = 256 
 z_dim = 5
 x_dim = 1
 h_dim = 3
-learning_rate = 1e-3
+learning_rate = 1e-4
 log_iter = 1000
 log_dir = 'iwgan1d_out_{}'.format(tag)
 
