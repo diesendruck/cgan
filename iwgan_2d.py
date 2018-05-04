@@ -23,22 +23,14 @@ tag = args.tag
 weighted = args.weighted
 do_p = args.do_p
 data_num = 10000
-batch_size = 1024 
+batch_size = 128 
 z_dim = 10  # Latent (Age)
 x_dim = 1  # Label (Height)
 y_dim = 1  # Data (Income)
 h_dim = 5
-learning_rate = 1e-4
+learning_rate = 5e-3
 log_iter = 1000
 log_dir = 'iwgan_out_{}'.format(tag)
-
-
-def thinning_fn(inputs, is_tf=True):
-    """Thinning on x only (height). Inputs is a vector of x values."""
-    if is_tf:
-        return 0.9 / (1. + tf.exp(-0.95 * (inputs - 3.))) + 0.1
-    else:
-        return 0.9 / (1. + np.exp(-0.95 * (inputs - 3.))) + 0.1
 
 
 def generate_data(n):
@@ -83,6 +75,22 @@ def generate_data(n):
     data_raw_std = np.std(data_raw, axis=0)
     data_normed = (data_raw - data_raw_mean) / data_raw_std 
     return data_normed, data_raw, data_raw_mean, data_raw_std, data_raw_unthinned
+
+
+def thinning_fn(inputs, is_tf=True):
+    """Thinning on x only (height). Inputs is a vector of x values."""
+    if is_tf:
+        return 0.9 / (1. + tf.exp(-0.95 * (inputs - 3.))) + 0.1
+    else:
+        return 0.9 / (1. + np.exp(-0.95 * (inputs - 3.))) + 0.1
+
+
+# Load data.
+data_normed, data_raw, data_raw_mean, data_raw_std, data_raw_unthinned = \
+    generate_data(data_num)
+if do_p:
+    data_normed = to_normed(data_raw_unthinned)
+    data_raw = data_raw_unthinned
 
 
 def sample_data(data, batch_size, weighted=weighted):
@@ -269,12 +277,12 @@ errors_real = sigmoid_cross_entropy_with_logits(d_logit_real,
 errors_fake = sigmoid_cross_entropy_with_logits(d_logit_fake,
     tf.zeros_like(d_logit_fake))
 if weighted:
-    #weights_x = 1. / thinning_fn(x)
-    #weights_x_sum_normalized = weights_x / tf.reduce_sum(weights_x)
-    # TODO: Sum or Mean?
-    #d_loss_real = tf.reduce_mean(weights_x_sum_normalized * errors_real)
-    d_loss_real = tf.reduce_mean(w * errors_real)
-    #d_loss_real = tf.reduce_sum(weights_x_sum_normalized * errors_real)
+    x_unnormed = x * data_raw_std[0] + data_raw_mean[0]
+    weights_x = 1. / thinning_fn(x_unnormed)
+    weights_x_sum_normalized = weights_x / tf.reduce_sum(weights_x)
+    d_loss_real = tf.reduce_sum(weights_x_sum_normalized * errors_real)
+    #w_normed = w / tf.reduce_sum(w) 
+    #d_loss_real = tf.reduce_sum(w_normed * errors_real)
 else:
     d_loss_real = tf.reduce_mean(errors_real)
 d_loss_fake = tf.reduce_mean(errors_fake)
@@ -300,13 +308,6 @@ g_optim = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(
 ################################################################################
 
 
-# Load data.
-data_normed, data_raw, data_raw_mean, data_raw_std, data_raw_unthinned = \
-    generate_data(data_num)
-if do_p:
-    data_normed = to_normed(data_raw_unthinned)
-    data_raw = data_raw_unthinned
-
 # Compute global approximation of weights (1/~T(x)).
 global_weights = []
 for v in data_normed:
@@ -328,43 +329,29 @@ for it in range(500000):
     z_batch = get_sample_z(batch_size, z_dim)
 
     if weighted:
-        for _ in range(5):
-            _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
-                    [d_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
-                feed_dict={
-                    x: x_batch,
-                    z: z_batch,
-                    y: y_batch,
-                    w: weights_batch})
-        for _ in range(1):
-            _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
-                    [g_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
-                feed_dict={
-                    x: x_batch,
-                    z: z_batch,
-                    y: y_batch,
-                    w: weights_batch})
+        fetch_dict = {
+            x: x_batch,
+            z: z_batch,
+            y: y_batch,
+            w: weights_batch}
     else:
-        for _ in range(5):
-            _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
-                    [d_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
-                feed_dict={
-                    x: x_batch,
-                    z: z_batch,
-                    y: y_batch})
-        for _ in range(1):
-            _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
-                    [g_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
-                feed_dict={
-                    x: x_batch,
-                    z: z_batch,
-                    y: y_batch})
+        fetch_dict = {
+            x: x_batch,
+            z: z_batch,
+            y: y_batch}
+
+    for _ in range(5):
+        _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
+            [d_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
+            fetch_dict)
+    for _ in range(1):
+        _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
+            [g_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
+            fetch_dict)
 
     if it % log_iter == 0:
         print("#################")
         print('Iter: {}, lr={}'.format(it, learning_rate))
-        print('  d_logit_real: {}'.format(d_logit_real_[:5]))
-        print('  d_logit_fake: {}'.format(d_logit_fake_[:5]))
         print('  d_loss: {:.4}'.format(d_loss_))
         print('  g_loss: {:.4}'.format(g_loss_))
 

@@ -3,6 +3,8 @@ import tensorflow as tf
 layers = tf.layers
 from tensorflow.examples.tutorials.mnist import input_data
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import os
 import pdb
@@ -12,7 +14,7 @@ from matplotlib.gridspec import GridSpec
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--tag', type=str, default='test')
-parser.add_argument('--weighted', default=True, action='store_true', dest='weighted',
+parser.add_argument('--weighted', default=False, action='store_true', dest='weighted',
                     help='Chooses whether to use weighted MMD.')
 parser.add_argument('--do_p', default=False, action='store_true', dest='do_p',
                     help='Choose whether to use P, instead of TP')
@@ -21,7 +23,7 @@ tag = args.tag
 weighted = args.weighted
 do_p = args.do_p
 data_num = 10000
-batch_size = 64 
+batch_size = 256 
 z_dim = 5  # Latent (Age)
 x_dim = 1  # Label (Height)
 y_dim = 1  # Data (Income)
@@ -40,6 +42,13 @@ def generate_data(n):
         out = np.reshape([v1, v2], [1, -1])
         return out
 
+    def gen_from_angled_bar():
+        v1 = np.random.uniform(0., 6)
+        v2 = np.random.normal(0., 2. - v1 / 3.)
+        #v2 = np.random.normal(0.,  v1 / 6.)
+        out = np.reshape([v1, v2], [1, -1])
+        return out
+
     def gen_from_horseshoe():
         # Consider a latent variable that regulates height and income.
         latent = np.random.gamma(1., 8.)
@@ -50,13 +59,14 @@ def generate_data(n):
         out = np.reshape([v1, v2], [1, -1])
         return out
 
-    #data_raw = gen_from_horseshoe()
-    data_raw = gen_from_filled_circle()
+    sampling_fn = gen_from_angled_bar
+
     data_raw_unthinned = np.zeros((n, 2))
+    data_raw = sampling_fn()
     for i in range(n):
-        data_raw_unthinned[i] = gen_from_filled_circle()
+        data_raw_unthinned[i] = sampling_fn()
     while len(data_raw) < n:
-        out_xyl = gen_from_filled_circle()
+        out_xyl = sampling_fn()
         if np.random.binomial(1, thinning_fn(out_xyl[0][0], is_tf=False)):
             data_raw = np.concatenate((data_raw, out_xyl), axis=0)
 
@@ -66,20 +76,28 @@ def generate_data(n):
     return data_normed, data_raw, data_raw_mean, data_raw_std, data_raw_unthinned
 
 
+def thinning_fn(inputs, is_tf=True):
+    """Thinning on x only (height). Inputs is a vector of x values."""
+    if is_tf:
+        return 0.9 / (1. + tf.exp(-0.95 * (inputs - 3.))) + 0.1
+    else:
+        return 0.9 / (1. + np.exp(-0.95 * (inputs - 3.))) + 0.1
+
+
+# Load data.
+data_normed, data_raw, data_raw_mean, data_raw_std, data_raw_unthinned = \
+    generate_data(data_num)
+if do_p:
+    data_normed = to_normed(data_raw_unthinned)
+    data_raw = data_raw_unthinned
+
+
 def sample_data(data, batch_size):
     assert data.shape[1] == 2, 'data shape not 2'
     idxs = np.random.choice(data_num, batch_size)
     batch_x = np.reshape(data[idxs, 0], [-1, 1])
     batch_y = np.reshape(data[idxs, 1], [-1, 1])
     return batch_x, batch_y
-
-
-def thinning_fn(inputs, is_tf=True):
-    """Thinning on x only (height). Inputs is a vector of x values."""
-    if is_tf:
-        return 0.99 / (1. + tf.exp(-0.95 * (inputs - 0.))) + 0.01
-    else:
-        return 0.99 / (1. + np.exp(-0.95 * (inputs - 0.))) + 0.01
 
 
 def sigmoid_cross_entropy_with_logits(logits, labels):
@@ -99,11 +117,6 @@ def plot(generated, data_raw, it):
     # Evaluate D on grid.
     grid_gran = 20
     grid1 = np.linspace(min(data_raw[:, 0]), max(data_raw[:, 0]), grid_gran)
-    #grid2 = np.linspace(min(data_normed[:, 1]), max(data_normed[:, 1]), grid_gran)
-    #vals_on_grid = np.zeros((grid_gran, grid_gran))
-    #for i in range(grid_gran):
-    #    for j in range(grid_gran):
-    #        vals_on_grid[i][j] = run_discrim(grid1[i], grid2[j])
 
     fig = plt.figure()
     gs = GridSpec(4, 4)
@@ -115,7 +128,7 @@ def plot(generated, data_raw, it):
     raw_v2 = [d[1] for d in data_raw]
     ax_joint.scatter(raw_v1, raw_v2, c='gray', alpha=0.3)
     ax_joint.scatter(gen_v1, gen_v2, alpha=0.3)
-    ax_joint.set_aspect('equal')
+    ax_joint.set_aspect('auto')
     ax_thinning = ax_joint.twinx()
     ax_thinning.plot(grid1, thinning_fn(grid1, is_tf=False), color='red', alpha=0.3)
     ax_marg_x.hist([raw_v1, gen_v1], bins=30, color=['gray', 'blue'],
@@ -140,23 +153,13 @@ def plot(generated, data_raw, it):
     plt.savefig('{}/{}.png'.format(log_dir, it))
     plt.close()
 
-    # Also plot heatmap.
-    #plt.figure()
-    #plt.imshow(vals_on_grid, interpolation='nearest', aspect='equal',
-    #    extent=[grid1.min(), grid1.max(), grid2.min(), grid2.max()])
-    #plt.colorbar()
-    #plt.savefig('{}/heatmap.png'.format(log_dir))
-    #plt.close()
-
 
 def get_sample_z(m, n):
     return np.random.normal(0., 1., size=[m, n])
 
 
-def run_discrim(x_in, y_in):
-    x_in = np.reshape(x_in, [-1, 1])
-    y_in = np.reshape(y_in, [-1, 1])
-    return sess.run(d_real, feed_dict={x: x_in, y: y_in}) 
+def upper(mat):
+    return tf.matrix_band_part(mat, 0, -1) - tf.matrix_band_part(mat, 0, 0)
 
 
 def to_raw(d, index=None):
@@ -206,7 +209,7 @@ def generator(z, reuse=False):
     return g, g_vars
 
 
-def compute_mmd(input1, input2, weighted=True):
+def compute_mmd(input1, input2, weighted=False):
     """Computes MMD between two batches of d-dimensional inputs.
     
     In this setting, input1 is real and input2 is generated.
@@ -228,29 +231,29 @@ def compute_mmd(input1, input2, weighted=True):
     K_xx = K[:batch_size, :batch_size]
     K_yy = K[batch_size:, batch_size:]
     K_xy = K[:batch_size, batch_size:]
-    K_xx_upper = tf.matrix_band_part(K_xx, 0, -1) - tf.matrix_band_part(K_xx, 0, 0)
-    K_yy_upper = tf.matrix_band_part(K_yy, 0, -1) - tf.matrix_band_part(K_yy, 0, 0)
+    K_xx_upper = upper(K_xx)
+    K_yy_upper = upper(K_yy)
 
-    thinning_by_x = tf.reshape(thinning_fn(v[:, 0]), [-1, 1])
-    thinning_by_x_tiled_horiz = tf.tile(thinning_by_x, [1, batch_size + batch_size])
-    p1_weights = 1. / thinning_by_x_tiled_horiz
+    x_unnormed = v[:batch_size, :1]
+    weights_x = 1. / thinning_fn(x_unnormed)
+    weights_x_tiled_horiz = tf.tile(weights_x, [1, batch_size])
+    p1_weights = weights_x_tiled_horiz
     p2_weights = tf.transpose(p1_weights) 
-    p1p2_weights_xx = p1_weights[:batch_size, :batch_size] * p2_weights[:batch_size, :batch_size]
-    p1p2_weights_xx_normed = p1p2_weights_xx / tf.reduce_sum(p1p2_weights_xx)
-    p1_weights_xy = p1_weights[:batch_size, batch_size:]
-    p1_weights_xy_normed = p1_weights_xy / tf.reduce_sum(p1_weights_xy)
+    p1p2_weights = p1_weights * p2_weights
+    p1p2_weights_upper = upper(p1p2_weights)
+    p1p2_weights_upper_normed = p1p2_weights_upper / tf.reduce_sum(p1p2_weights_upper)
+    p1_weights_normed = p1_weights / tf.reduce_sum(p1_weights)
+    Kw_xx_upper = K_xx * p1p2_weights_upper_normed
+    Kw_xy = K_xy * p1_weights_normed
 
-    Kw_xx = K_xx * p1p2_weights_xx_normed
-    Kw_xy = K_xy * p1_weights_xy_normed
-    Kw_xx_upper = tf.matrix_band_part(Kw_xx, 0, -1) - tf.matrix_band_part(Kw_xx, 1, 0)
     if weighted: 
-        mmd = (tf.reduce_sum(Kw_xx_upper) / num_combos_xx +
+        mmd = (tf.reduce_sum(Kw_xx_upper) +
                tf.reduce_sum(K_yy_upper) / num_combos_yy -
                2 * tf.reduce_sum(Kw_xy))
     else:
         mmd = (tf.reduce_sum(K_xx_upper) / num_combos_xx +
                tf.reduce_sum(K_yy_upper) / num_combos_yy -
-               2 * tf.reduce_sum(K_xy))
+               2 * tf.reduce_sum(K_xy) / (batch_size * batch_size))
     return mmd
         
 
@@ -270,14 +273,16 @@ d_real, d_logit_real, d_vars = discriminator(real, reuse=False)
 d_fake, d_logit_fake, _ = discriminator(g, reuse=True)
 
 # Define losses.
-mmd = compute_mmd(real, g)
+mmd = compute_mmd(real, g, weighted=weighted)
 errors_real = sigmoid_cross_entropy_with_logits(d_logit_real,
     tf.ones_like(d_logit_real))
 errors_fake = sigmoid_cross_entropy_with_logits(d_logit_fake,
     tf.zeros_like(d_logit_fake))
 if weighted:
-    weights_x = 1. / thinning_fn(x)
-    d_loss_real = tf.reduce_mean(weights_x * errors_real)
+    x_unnormed = x * data_raw_std[0] + data_raw_mean[0]
+    weights_x = 1. / thinning_fn(x_unnormed)
+    weights_x_sum_normalized = weights_x / tf.reduce_sum(weights_x)
+    d_loss_real = tf.reduce_sum(weights_x_sum_normalized * errors_real)
 else:
     d_loss_real = tf.reduce_mean(errors_real)
 d_loss_fake = tf.reduce_mean(errors_fake)
@@ -305,13 +310,6 @@ g_optim = tf.train.AdamOptimizer(learning_rate=lr).minimize(
 # End: Build model.
 ################################################################################
 
-
-# Load data.
-data_normed, data_raw, data_raw_mean, data_raw_std, data_raw_unthinned = \
-    generate_data(data_num)
-if do_p:
-    data_normed = to_normed(data_raw_unthinned)
-    data_raw = data_raw_unthinned
 
 # Start session.
 sess = tf.Session()

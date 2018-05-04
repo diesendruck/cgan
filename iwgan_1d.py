@@ -18,19 +18,16 @@ parser.add_argument('--weighted', default=False, action='store_true', dest='weig
                     help='Chooses whether Vanilla GAN or IW-GAN.')
 parser.add_argument('--do_p', default=False, action='store_true', dest='do_p',
                     help='Choose whether to use P, instead of TP')
-parser.add_argument('--do_mmd', default=False, action='store_true', dest='do_mmd',
-                    help='Choose whether to use MMD, instead of GAN')
 args = parser.parse_args()
 tag = args.tag
 weighted = args.weighted
 do_p = args.do_p
-do_mmd = args.do_mmd
 data_num = 10000
-batch_size = 64
+batch_size = 128 
 z_dim = 5
 x_dim = 1
 h_dim = 3
-learning_rate = 1e-4
+learning_rate = 1e-3
 log_iter = 1000
 log_dir = 'iwgan1d_out_{}'.format(tag)
 
@@ -97,19 +94,18 @@ def thinning_fn(inputs, is_tf=True):
         return 0.5 / (1. + np.exp(10 * (inputs - 1.))) + 0.5
 
 
-# Load data.
-data_normed, data_raw, data_raw_mean, data_raw_std, data_raw_unthinned = \
-    generate_data(data_num)
-if do_p:
-    data_normed = to_normed(data_raw_unthinned)
-    data_raw = data_raw_unthinned
+def upper(mat):
+    return tf.matrix_band_part(mat, 0, -1) - tf.matrix_band_part(mat, 0, 0)
 
 
-def sample_data(data, batch_size):
+def sample_data(data, batch_size, weighted=weighted):
     assert data.shape[1] == 1, 'data shape not 1'
     idxs = np.random.choice(data_num, batch_size)
     batch_x = np.reshape(data[idxs, 0], [-1, 1])
-    return batch_x
+    weights = None
+    if weighted:
+        weights = global_weights[idxs]
+    return batch_x, weights
 
 
 def sigmoid_cross_entropy_with_logits(logits, labels):
@@ -130,11 +126,10 @@ def plot(generated, data_raw, data_raw_unthinned, it):
     # Evaluate D on grid.
     grid_gran = 40
     grid_x = np.linspace(min(min(data_raw), min(generated)), max(max(data_raw), max(generated)), grid_gran)
-    if not do_mmd:
-        vals_on_grid = np.zeros(grid_gran)
-        for i in range(grid_gran):
-            grid_x_normed = (grid_x[i] - data_raw_mean) / data_raw_std
-            vals_on_grid[i] = run_discrim(grid_x_normed)
+    vals_on_grid = np.zeros(grid_gran)
+    for i in range(grid_gran):
+        grid_x_normed = (grid_x[i] - data_raw_mean) / data_raw_std
+        vals_on_grid[i] = run_discrim(grid_x_normed)
 
     fig = plt.figure()
     gs = GridSpec(2, 1)
@@ -151,23 +146,9 @@ def plot(generated, data_raw, data_raw_unthinned, it):
     ax_thinning_fn.plot(grid_x, thinning_fn(grid_x, is_tf=False), color='red', alpha=0.3, label='thinning')
     ax_thinning_fn.legend(loc='lower right')
 
-    if not do_mmd:
-        ax_discrim_fn = ax_thinned.twinx()
-        ax_discrim_fn.plot(grid_x, vals_on_grid, color='green', alpha=0.3, label='discrim')
-        ax_discrim_fn.legend(loc='lower right')
-
-
-    # Turn off tick labels on marginals
-    #plt.setp(ax_marg_x.get_xticklabels(), visible=False)
-    #plt.setp(ax_marg_y.get_yticklabels(), visible=False)
-
-    # Set labels on joint
-    #ax_joint.set_xlabel('Joint: height (ft)')
-    #ax_joint.set_ylabel('Joint: income ($)')
-
-    # Set labels on marginals
-    #ax_marg_y.set_xlabel('Marginal: income')
-    #ax_marg_x.set_ylabel('Marginal: height')
+    ax_discrim_fn = ax_thinned.twinx()
+    ax_discrim_fn.plot(grid_x, vals_on_grid, color='green', alpha=0.3, label='discrim')
+    ax_discrim_fn.legend(loc='lower right')
 
     plt.savefig('{}/{}.png'.format(log_dir, it))
     plt.close()
@@ -238,85 +219,9 @@ def discriminator(inputs, reuse=False):
     return d_prob, d_logit, d_vars 
 
 
-def compute_mmd(input1, input2, batch_size, weighted=False):
-    """Computes MMD between two batches of d-dimensional inputs.
-    
-    In this setting, input1 is real and input2 is generated.
-    """
-    num_combos_xx = tf.to_float(batch_size * (batch_size - 1) / 2)
-    num_combos_yy = tf.to_float(batch_size * (batch_size - 1) / 2)
-
-    v = tf.concat([input1, input2], 0)
-    VVT = tf.matmul(v, tf.transpose(v))
-    sqs = tf.reshape(tf.diag_part(VVT), [-1, 1])
-    sqs_tiled_horiz = tf.tile(sqs, tf.transpose(sqs).get_shape())
-    exp_object = sqs_tiled_horiz - 2 * VVT + tf.transpose(sqs_tiled_horiz)
-
-    K = 0
-    sigma_list = [0.01, 1.0, 2.0]
-    for sigma in sigma_list:
-        #gamma = 1.0 / (2.0 * sigma ** 2)
-        K += tf.exp(-0.5 * (1 / sigma) * exp_object)
-    K_xx = K[:batch_size, :batch_size]
-    K_yy = K[batch_size:, batch_size:]
-    K_xy = K[:batch_size, batch_size:]
-    K_xx_upper = tf.matrix_band_part(K_xx, 0, -1) - tf.matrix_band_part(K_xx, 0, 0)
-    K_yy_upper = tf.matrix_band_part(K_yy, 0, -1) - tf.matrix_band_part(K_yy, 0, 0)
-    K_yy_offdiag = K_yy - tf.matrix_band_part(K_yy, 0, 0)
-
-    thinning_by_x = tf.reshape(thinning_fn(v[:, 0]), [-1, 1])
-    thinning_by_x_tiled_horiz = tf.tile(thinning_by_x, [1, batch_size + batch_size])
-    p1_weights = 1. / thinning_by_x_tiled_horiz
-    p2_weights = tf.transpose(p1_weights)
-    p1p2_weights_xx = p1_weights[:batch_size, :batch_size] * \
-                      p2_weights[:batch_size, :batch_size]
-
-    # Offdiag weighting.
-    p1p2_weights_xx_offdiag = p1p2_weights_xx - \
-                              tf.matrix_band_part(p1p2_weights_xx, 0, 0)
-    p1p2_weights_xx_offdiag_normed = p1p2_weights_xx_offdiag / \
-                                     tf.reduce_sum(p1p2_weights_xx_offdiag)
-    Kw_xx_offdiag = K_xx * p1p2_weights_xx_offdiag_normed
-
-    # Old weighting.
-    p1p2_weights_xx_normed = p1p2_weights_xx / tf.reduce_sum(p1p2_weights_xx)
-    Kw_xx = K_xx * p1p2_weights_xx_normed
-    Kw_xx_upper = tf.matrix_band_part(Kw_xx, 0, -1) - tf.matrix_band_part(Kw_xx, 0, 0)  # <-- this diag part is incorrectly specified, should not be 1, 0; but rather 0, 0
-
-    p1_weights_xy = p1_weights[:batch_size, batch_size:]  # Same.
-    p1_weights_xy_normed = p1_weights_xy / tf.reduce_sum(p1_weights_xy)  # Same.
-    Kw_xy = K_xy * p1_weights_xy_normed
-
-    if weighted:
-        # TODO: Sort why theory_unbiased and theory_upper don't work.
-        option = 'theory_unbiased'
-
-        if option == 'theory_unbiased':
-            mmd = (tf.reduce_sum(Kw_xx_offdiag) / (batch_size * batch_size - 1) +
-                   tf.reduce_sum(K_yy_offdiag) / (batch_size * batch_size - 1) -
-                   2 * tf.reduce_sum(Kw_xy) / (batch_size * batch_size))
-        elif option == 'theory_upper':
-            mmd = (tf.reduce_sum(Kw_xx_upper) / num_combos_xx +
-                   tf.reduce_sum(K_yy_upper) / num_combos_yy -
-                   2 * tf.reduce_sum(Kw_xy) / (batch_size * batch_size))
-        elif option == 'theory_biased':
-            mmd = (tf.reduce_sum(Kw_xx) / (batch_size ** 2) +
-                   tf.reduce_sum(K_yy) / (batch_size ** 2) -
-                   2 * tf.reduce_sum(Kw_xy) / (batch_size ** 2))
-        elif option == 'old':
-            mmd = (tf.reduce_sum(Kw_xx_upper) +
-                   tf.reduce_sum(K_yy_upper) / num_combos_yy -
-                   2 * tf.reduce_sum(Kw_xy))
-
-    else:
-        mmd = (tf.reduce_sum(K_xx_upper) / num_combos_xx +
-               tf.reduce_sum(K_yy_upper) / num_combos_yy -
-               2 * tf.reduce_sum(K_xy) / (batch_size * batch_size))
-    return mmd, exp_object, p1p2_weights_xx
-
-
 # Beginning of graph.
 z = tf.placeholder(tf.float32, shape=[batch_size, z_dim], name='z')
+w = tf.placeholder(tf.float32, shape=[batch_size, 1], name='w')
 x = tf.placeholder(tf.float32, shape=[batch_size, x_dim], name='x')
 
 g, g_vars = generator(z, reuse=False)
@@ -334,20 +239,17 @@ errors_real = sigmoid_cross_entropy_with_logits(d_logit_real,
 errors_fake = sigmoid_cross_entropy_with_logits(d_logit_fake,
     tf.zeros_like(d_logit_fake))
 if weighted:
-    weights_x = 1. / thinning_fn(x)
-    weights_x_sum_normalized = weights_x / tf.reduce_sum(weights_x)
-    d_loss_real = tf.reduce_mean(weights_x_sum_normalized * errors_real)
+    #weights_x = 1. / thinning_fn(x)
+    #weights_x_sum_normalized = weights_x / tf.reduce_sum(weights_x)
+    #d_loss_real = tf.reduce_mean(weights_x_sum_normalized * errors_real)
+    d_loss_real = tf.reduce_mean(w * errors_real)
 else:
     d_loss_real = tf.reduce_mean(errors_real)
 d_loss_fake = tf.reduce_mean(errors_fake)
-mmd, exp_object_eval, p1p2_weights_xx_eval = compute_mmd(x, g, batch_size, weighted=weighted)
 
 d_loss = d_loss_real + d_loss_fake
-if do_mmd:
-    g_loss = mmd
-else:
-    g_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
-        logits=d_logit_fake, labels=tf.ones_like(d_logit_fake)))
+g_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+    logits=d_logit_fake, labels=tf.ones_like(d_logit_fake)))
 
 # Set optim nodes.
 clip = 1
@@ -372,6 +274,20 @@ else:
 ################################################################################
 
 
+# Load data.
+data_normed, data_raw, data_raw_mean, data_raw_std, data_raw_unthinned = \
+    generate_data(data_num)
+if do_p:
+    data_normed = to_normed(data_raw_unthinned)
+    data_raw = data_raw_unthinned
+
+# Compute global approximation of weights (1/~T(x)).
+global_weights = []
+for v in data_normed:
+    global_weights.append(1. / thinning_fn(to_raw(v)[0], is_tf=False))
+global_weights = np.reshape(np.array(
+    global_weights * data_num / np.sum(global_weights)), [-1, 1])
+
 # Start session.
 sess = tf.Session()
 sess.run(tf.global_variables_initializer())
@@ -381,38 +297,34 @@ if not os.path.exists(log_dir):
 
 # train()
 for it in range(500000):
-    x_batch = sample_data(data_normed, batch_size)
+    x_batch, weights_batch = sample_data(data_normed, batch_size, weighted=weighted)
     z_batch = get_sample_z(batch_size, z_dim)
 
-    if not do_mmd:
-        for _ in range(5):
-            _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
-                    [d_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
-                feed_dict={
-                    x: x_batch,
-                    z: z_batch})
-        for _ in range(1):
-            _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
-                    [g_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
-                feed_dict={
-                    x: x_batch,
-                    z: z_batch})
+    if weighted:
+        fetch_dict = {
+            x: x_batch,
+            z: z_batch,
+            w: weights_batch}
     else:
-        _, g_loss_, eo, pp = sess.run([g_optim, g_loss, exp_object_eval, p1p2_weights_xx_eval],
-            feed_dict={
-                x: x_batch,
-                z: z_batch})
-        testing = sample_generator(1)
-        if np.isnan(testing[0][0]):
-            pdb.set_trace()
+        fetch_dict = {
+            x: x_batch,
+            z: z_batch}
+
+    for _ in range(5):
+        _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
+                [d_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
+                fetch_dict)
+    for _ in range(1):
+        _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
+                [g_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
+                fetch_dict)
 
     if it % log_iter == 0:
         print("#################")
         print('Iter: {}, lr={}'.format(it, learning_rate))
-        if not do_mmd:
-            print('  d_logit_real: {}'.format(d_logit_real_[:5]))
-            print('  d_logit_fake: {}'.format(d_logit_fake_[:5]))
-            print('  d_loss: {:.4}'.format(d_loss_))
+        print('  d_logit_real: {}'.format(d_logit_real_[:5]))
+        print('  d_logit_fake: {}'.format(d_logit_fake_[:5]))
+        print('  d_loss: {:.4}'.format(d_loss_))
         print('  g_loss: {:.4}'.format(g_loss_))
 
         n_sample = 1000

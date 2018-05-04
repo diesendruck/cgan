@@ -23,13 +23,13 @@ tag = args.tag
 weighted = args.weighted
 do_p = args.do_p
 data_num = 10000
-batch_size = 8
+batch_size = 64
 z_dim = 5
 x_dim = 1
 h_dim = 3
-learning_rate = 1e-4
+learning_rate = 1e-2
 log_iter = 1000
-log_dir = 'iwgan1d_out_{}'.format(tag)
+log_dir = 'mmdgan1d_out_{}'.format(tag)
 
 
 def generate_data(n):
@@ -151,6 +151,10 @@ def run_discrim(x_in):
     return sess.run(d_disc, feed_dict={x_disc: x_in}) 
 
 
+def upper(mat):
+    return tf.matrix_band_part(mat, 0, -1) - tf.matrix_band_part(mat, 0, 0)
+
+
 def sample_generator(n_sample):
     z_sample_input = get_sample_z(n_sample, z_dim)
     g_out = sess.run(g_sample, feed_dict={z_sample: z_sample_input})
@@ -209,7 +213,7 @@ def discriminator(inputs, reuse=False):
 
 def compute_mmd(input1, input2, batch_size, w, weighted=False):
     """Computes MMD between two batches of d-dimensional inputs.
-    
+ 
     In this setting, input1 is real and input2 is generated.
     """
     num_combos_xx = tf.to_float(batch_size * (batch_size - 1) / 2)
@@ -229,22 +233,21 @@ def compute_mmd(input1, input2, batch_size, w, weighted=False):
     K_xx = K[:batch_size, :batch_size]
     K_yy = K[batch_size:, batch_size:]
     K_xy = K[:batch_size, batch_size:]
-    # Zero out everything but upper triangle (note: this zeros diagonal, too).
-    K_xx_upper = tf.matrix_band_part(K_xx, 0, -1) - tf.matrix_band_part(K_xx, 0, 0)  
-    K_yy_upper = tf.matrix_band_part(K_yy, 0, -1) - tf.matrix_band_part(K_yy, 0, 0)
-    K_yy_offdiag = K_yy - tf.matrix_band_part(K_yy, 0, 0)
+    K_yy_upper = upper(K_yy)
 
-    # Build out weight matrices, and multiply.
     p1_weights = tf.tile(w, [1, batch_size])
     p2_weights = tf.transpose(p1_weights)
     p1p2_weights = p1_weights * p2_weights
-    Kw_xx_upper = K_xx_upper * p1p2_weights
-    Kw_xy = K_xy * p1_weights
+    p1p2_weights_upper = upper(p1p2_weights)
+    p1p2_weights_upper_normed = p1p2_weights_upper / tf.reduce_sum(p1p2_weights_upper)
+    p1_weights_normed = p1_weights / tf.reduce_sum(p1_weights)
+    Kw_xx_upper = K_xx * p1p2_weights_upper_normed
+    Kw_xy = K_xy * p1_weights_normed
 
     if weighted:
-        mmd = (tf.reduce_sum(Kw_xx_upper) / num_combos_xx +
+        mmd = (tf.reduce_sum(Kw_xx_upper) +
                tf.reduce_sum(K_yy_upper) / num_combos_yy -
-               2 * tf.reduce_sum(Kw_xy) / (batch_size * batch_size))
+               2 * tf.reduce_sum(Kw_xy))
     else:
         mmd = (tf.reduce_sum(K_xx_upper) / num_combos_xx +
                tf.reduce_sum(K_yy_upper) / num_combos_yy -
@@ -292,8 +295,9 @@ if do_p:
 global_weights = []
 for v in data_normed:
     global_weights.append(1. / thinning_fn(to_raw(v)[0], is_tf=False))
-global_weights = np.reshape(np.array(
-    global_weights * data_num / np.sum(global_weights)), [-1, 1])
+global_weights = np.reshape(
+    global_weights * data_num / np.sum(global_weights), [-1, 1])
+    #global_weights / np.sum(global_weights), [-1, 1])
 
 # Start session.
 sess = tf.Session()
@@ -308,6 +312,7 @@ for it in range(500000):
     z_batch = get_sample_z(batch_size, z_dim)
 
     if weighted:
+        #_, g_loss_ = sess.run([g_optim, g_loss],
         _, g_loss_ = sess.run([g_optim, g_loss],
             feed_dict={
                 x: x_batch,
