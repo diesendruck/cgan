@@ -23,7 +23,7 @@ tag = args.tag
 weighted = args.weighted
 do_p = args.do_p
 data_num = 10000
-batch_size = 64 
+batch_size = 1024 
 z_dim = 10  # Latent (Age)
 x_dim = 1  # Label (Height)
 y_dim = 1  # Data (Income)
@@ -244,7 +244,7 @@ def compute_mmd(input1, input2, weighted=False):
     K_xx_upper = upper(K_xx)
     K_yy_upper = upper(K_yy)
 
-    x_unnormed = v[:batch_size, :1]
+    x_unnormed = v[:batch_size, :1] * data_raw_std[0] + data_raw_mean[0]
     weights_x = 1. / thinning_fn(x_unnormed)
     weights_x_tiled_horiz = tf.tile(weights_x, [1, batch_size])
     p1_weights = weights_x_tiled_horiz
