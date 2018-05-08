@@ -23,12 +23,12 @@ tag = args.tag
 weighted = args.weighted
 do_p = args.do_p
 data_num = 10000
-batch_size = 512 
+batch_size = 1024 
 z_dim = 10  # Latent (Age)
 x_dim = 1  # Label (Height)
 y_dim = 1  # Data (Income)
 h_dim = 5
-learning_rate = 1e-3
+learning_rate = 1e-4
 log_iter = 1000
 log_dir = 'iwgan_out_{}'.format(tag)
 
@@ -60,6 +60,7 @@ def generate_data(n):
         return out
 
     sampling_fn = gen_from_angled_bar
+    #sampling_fn = gen_from_horseshoe
 
     data_raw_unthinned = np.zeros((n, 2))
     data_raw = sampling_fn()
@@ -84,12 +85,14 @@ def thinning_fn(inputs, is_tf=True):
         return 0.9 / (1. + np.exp(-0.95 * (inputs - 3.))) + 0.1
 
 
+###############################################################################
 # Load data.
 data_normed, data_raw, data_raw_mean, data_raw_std, data_raw_unthinned = \
     generate_data(data_num)
 if do_p:
     data_normed = to_normed(data_raw_unthinned)
     data_raw = data_raw_unthinned
+###############################################################################
 
 
 def sample_data(data, batch_size, weighted=weighted):
@@ -108,6 +111,62 @@ def sigmoid_cross_entropy_with_logits(logits, labels):
         return tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=labels)
     except:
         return tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, targets=labels)
+
+
+def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False):
+    """Computes mmd between two numpy arrays of same size."""
+    if sigma_list is None:
+        sigma_list = [1.0]
+
+    n1 = len(arr1)
+    n2 = len(arr2)
+
+    if use_tf:
+        v = tf.concat([arr1, arr2], 0)
+        VVT = tf.matmul(v, tf.transpose(v))
+        sqs = tf.reshape(tf.diag_part(VVT), [-1, 1])
+        sqs_tiled_horiz = tf.tile(sqs, tf.transpose(sqs).get_shape())
+        exp_object = sqs_tiled_horiz - 2 * VVT + tf.transpose(sqs_tiled_horiz)
+        K = 0.0
+        for sigma in sigma_list:
+            gamma = 1.0 / (2.0 * sigma**2)
+            K += tf.exp(-gamma * exp_object)
+        K_xx = K[:n1, :n1]
+        K_yy = K[n1:, n1:]
+        K_xy = K[:n1, n1:]
+        K_xx_upper = tf.matrix_band_part(K_xx, 0, -1)
+        K_yy_upper = tf.matrix_band_part(K_yy, 0, -1)
+        num_combos_x = tf.to_float(n1 * (n1 - 1) / 2)
+        num_combos_y = tf.to_float(n2 * (n2 - 1) / 2)
+        num_combos_xy = tf.to_float(n1 * n2)
+        mmd = (tf.reduce_sum(K_xx_upper) / num_combos_x +
+               tf.reduce_sum(K_yy_upper) / num_combos_y -
+               2 * tf.reduce_sum(K_xy) / num_combos_xy)
+        return mmd, exp_object
+    else:
+        if len(arr1.shape) == 1:
+            arr1 = np.reshape(arr1, [-1, 1])
+            arr2 = np.reshape(arr2, [-1, 1])
+        v = np.concatenate((arr1, arr2), 0)
+        VVT = np.matmul(v, np.transpose(v))
+        sqs = np.reshape(np.diag(VVT), [-1, 1])
+        sqs_tiled_horiz = np.tile(sqs, np.transpose(sqs).shape)
+        exp_object = sqs_tiled_horiz - 2 * VVT + np.transpose(sqs_tiled_horiz)
+        K = 0.0
+        for sigma in sigma_list:
+            gamma = 1.0 / (2.0 * sigma**2)
+            K += np.exp(-gamma * exp_object)
+        K_xx = K[:n1, :n1]
+        K_yy = K[n1:, n1:]
+        K_xy = K[:n1, n1:]
+        K_xx_upper = np.triu(K_xx)
+        K_yy_upper = np.triu(K_yy)
+        num_combos_x = n1 * (n1 - 1) / 2
+        num_combos_y = n2 * (n2 - 1) / 2
+        mmd = (np.sum(K_xx_upper) / num_combos_x +
+               np.sum(K_yy_upper) / num_combos_y -
+               2 * np.sum(K_xy) / (n1 * n2))
+        return mmd, exp_object
 
 
 def plot(generated, data_raw, data_raw_unthinned, it):
@@ -330,22 +389,25 @@ for it in range(500000):
             fetch_dict)
 
     if it % log_iter == 0:
-        print("#################")
-        print('Iter: {}, lr={}'.format(it, learning_rate))
-        print('  d_loss: {:.4}'.format(d_loss_))
-        print('  g_loss: {:.4}'.format(g_loss_))
-
         n_sample = 10000
         z_sample_input = get_sample_z(n_sample, z_dim)
         g_out = sess.run(g_sample, feed_dict={z_sample: z_sample_input})
         generated = np.array(g_out) * data_raw_std[:2] + data_raw_mean[:2]
+        mmd_gen_vs_unthinned, _ = compute_mmd(
+            generated[np.random.choice(n_sample, 500)],
+            data_raw_unthinned[np.random.choice(data_num, 500)])
+
+        fig = plot(generated, data_raw, data_raw_unthinned, it)
 
         # Print diagnostics.
+        print("#################")
+        print('Iter: {}, lr={}'.format(it, learning_rate))
+        print('  d_loss: {:.4}'.format(d_loss_))
+        print('  g_loss: {:.4}'.format(g_loss_))
+        print('  mmd_gen_vs_unthinned: {:.4}'.format(mmd_gen_vs_unthinned))
         print(data_raw[np.random.choice(data_num, 5), :])
         print
         print(generated[:5])
-
-        fig = plot(generated, data_raw, data_raw_unthinned, it)
 
         # Diagnostics for thinning_fn.
         thin_diag = 0
