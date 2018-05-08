@@ -13,7 +13,6 @@ import sys
 
 
 tag = 'bar'
-sampling_mode = 'weighting'  # ['upsampling', 'weighting'] 
 data_set = 'bar'
 data_num = 10000
 mb_size = 1024  # 128
@@ -346,18 +345,15 @@ for it in range(max_iter):
         z_sample = get_sample_z(n_sample, z_dim)
 
         # SAMPLE FROM CONDITIONAL, REGULATED BY THINNING_FN.
-        if sampling_mode == 'upsampling':
-            pass
-        else:
-            raw_marg_x = data_raw[:, 0]
-            thinning_fn_x = thinning_fn(raw_marg_x, is_tf=False)
-            weights_x = 1. / thinning_fn_x
-            weights_x_sum_normalized = weights_x / np.sum(weights_x)
-            x_sample_unnormed = np.random.choice(raw_marg_x, size=n_sample,
-                p=weights_x_sum_normalized)
-            x_sample = np.reshape(
-                (x_sample_unnormed - data_raw_mean[0]) / data_raw_std[0],  # Normed.
-                [-1, 1])
+        raw_marg_x = data_raw[:, 0]
+        thinning_fn_x = thinning_fn(raw_marg_x, is_tf=False)
+        weights_x = 1. / thinning_fn_x
+        weights_x_sum_normalized = weights_x / np.sum(weights_x)
+        x_sample_unnormed = np.random.choice(raw_marg_x, size=n_sample,
+            p=weights_x_sum_normalized)
+        x_sample = np.reshape(
+            (x_sample_unnormed - data_raw_mean[0]) / data_raw_std[0],  # Normed.
+            [-1, 1])
 
         g_out = sess.run(g, feed_dict={z: z_sample[:len(x_sample)], x: x_sample})
         generated_normed = np.hstack((x_sample, g_out))
@@ -378,6 +374,4 @@ for it in range(max_iter):
         print(data_raw[np.random.choice(data_num, 5), :])
         print
         print(generated[:5])
-        with open(os.path.join(log_dir, 'scores.txt'), 'a') as f:
-            f.write(str(mmd_gen_vs_unthinned)+'\n')
 
