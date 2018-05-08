@@ -411,6 +411,8 @@ for it in range(max_iter):
         print(data_raw[np.random.choice(data_num, 5), :])
         print
         print(generated[:5])
+        with open(os.path.join(log_dir, 'scores.txt'), 'a') as f:
+            f.write(str(mmd_gen_vs_unthinned)+'\n')
 
         # Diagnostics for thinning_fn.
         thin_diag = 0
