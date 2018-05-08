@@ -31,6 +31,7 @@ h_dim = 5
 learning_rate = 1e-4
 log_iter = 1000
 log_dir = 'iwgan_out_{}'.format(tag)
+max_iter = 100000
 
 
 def generate_data(n):
@@ -169,7 +170,7 @@ def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False):
         return mmd, exp_object
 
 
-def plot(generated, data_raw, data_raw_unthinned, it):
+def plot(generated, data_raw, data_raw_unthinned, it, mmd_gen_vs_unthinned):
     gen_v1 = generated[:, 0] 
     gen_v2 = generated[:, 1] 
     raw_v1 = [d[0] for d in data_raw]
@@ -202,9 +203,9 @@ def plot(generated, data_raw, data_raw_unthinned, it):
     ax_thinning = ax_joint.twinx()
     ax_thinning.plot(grid_x, thinning_fn(grid_x, is_tf=False), color='red', alpha=0.3)
     ax_marg_x.hist([raw_v1, gen_v1], bins=30, color=['gray', 'blue'],
-        label=['d', 'g'], alpha=0.3, normed=True)
+        label=['data', 'gen'], alpha=0.3, normed=True)
     ax_marg_y.hist([raw_v2, gen_v2], bins=30, color=['gray', 'blue'],
-        label=['d', 'g'], orientation="horizontal", alpha=0.3, normed=True)
+        label=['data', 'gen'], orientation="horizontal", alpha=0.3, normed=True)
     ax_marg_x.legend()
     ax_marg_y.legend()
 
@@ -225,6 +226,8 @@ def plot(generated, data_raw, data_raw_unthinned, it):
     plt.setp(ax_raw_marg_x.get_xticklabels(), visible=False)
     plt.setp(ax_raw_marg_y.get_yticklabels(), visible=False)
     ########
+
+    plt.suptitle('iwgan. it: {}, mmd_gen_vs_unthinned: {}'.format(it, mmd_gen_vs_unthinned))
 
     plt.savefig('{}/{}.png'.format(log_dir, it))
     plt.close()
@@ -362,7 +365,7 @@ if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 
 # train()
-for it in range(500000):
+for it in range(max_iter):
     x_batch, y_batch, weights_batch = sample_data(
         data_normed, batch_size, weighted=weighted)
     z_batch = get_sample_z(batch_size, z_dim)
@@ -397,7 +400,7 @@ for it in range(500000):
             generated[np.random.choice(n_sample, 500)],
             data_raw_unthinned[np.random.choice(data_num, 500)])
 
-        fig = plot(generated, data_raw, data_raw_unthinned, it)
+        fig = plot(generated, data_raw, data_raw_unthinned, it, mmd_gen_vs_unthinned)
 
         # Print diagnostics.
         print("#################")

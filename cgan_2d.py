@@ -12,7 +12,7 @@ from matplotlib.gridspec import GridSpec
 import sys
 
 
-tag = 'test'
+tag = 'bar'
 data_set = 'bar'
 data_num = 10000
 mb_size = 1024  # 128
@@ -21,8 +21,9 @@ x_dim = 1
 y_dim = 1
 h_dim = 5
 learning_rate = 1e-4
-log_iter = 2000
+log_iter = 1000
 log_dir = 'cgan_out_{}'.format(tag)
+max_iter = 100000
 
 
 def generate_data(n):
@@ -91,7 +92,63 @@ def sigmoid_cross_entropy_with_logits(logits, labels):
         return tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, targets=labels)
 
 
-def plot(generated, data_raw, data_raw_unthinned, it):
+def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False):
+    """Computes mmd between two numpy arrays of same size."""
+    if sigma_list is None:
+        sigma_list = [1.0]
+
+    n1 = len(arr1)
+    n2 = len(arr2)
+
+    if use_tf:
+        v = tf.concat([arr1, arr2], 0)
+        VVT = tf.matmul(v, tf.transpose(v))
+        sqs = tf.reshape(tf.diag_part(VVT), [-1, 1])
+        sqs_tiled_horiz = tf.tile(sqs, tf.transpose(sqs).get_shape())
+        exp_object = sqs_tiled_horiz - 2 * VVT + tf.transpose(sqs_tiled_horiz)
+        K = 0.0
+        for sigma in sigma_list:
+            gamma = 1.0 / (2.0 * sigma**2)
+            K += tf.exp(-gamma * exp_object)
+        K_xx = K[:n1, :n1]
+        K_yy = K[n1:, n1:]
+        K_xy = K[:n1, n1:]
+        K_xx_upper = tf.matrix_band_part(K_xx, 0, -1)
+        K_yy_upper = tf.matrix_band_part(K_yy, 0, -1)
+        num_combos_x = tf.to_float(n1 * (n1 - 1) / 2)
+        num_combos_y = tf.to_float(n2 * (n2 - 1) / 2)
+        num_combos_xy = tf.to_float(n1 * n2)
+        mmd = (tf.reduce_sum(K_xx_upper) / num_combos_x +
+               tf.reduce_sum(K_yy_upper) / num_combos_y -
+               2 * tf.reduce_sum(K_xy) / num_combos_xy)
+        return mmd, exp_object
+    else:
+        if len(arr1.shape) == 1:
+            arr1 = np.reshape(arr1, [-1, 1])
+            arr2 = np.reshape(arr2, [-1, 1])
+        v = np.concatenate((arr1, arr2), 0)
+        VVT = np.matmul(v, np.transpose(v))
+        sqs = np.reshape(np.diag(VVT), [-1, 1])
+        sqs_tiled_horiz = np.tile(sqs, np.transpose(sqs).shape)
+        exp_object = sqs_tiled_horiz - 2 * VVT + np.transpose(sqs_tiled_horiz)
+        K = 0.0
+        for sigma in sigma_list:
+            gamma = 1.0 / (2.0 * sigma**2)
+            K += np.exp(-gamma * exp_object)
+        K_xx = K[:n1, :n1]
+        K_yy = K[n1:, n1:]
+        K_xy = K[:n1, n1:]
+        K_xx_upper = np.triu(K_xx)
+        K_yy_upper = np.triu(K_yy)
+        num_combos_x = n1 * (n1 - 1) / 2
+        num_combos_y = n2 * (n2 - 1) / 2
+        mmd = (np.sum(K_xx_upper) / num_combos_x +
+               np.sum(K_yy_upper) / num_combos_y -
+               2 * np.sum(K_xy) / (n1 * n2))
+        return mmd, exp_object
+
+
+def plot(generated, data_raw, data_raw_unthinned, it, mmd_gen_vs_unthinned):
     gen_v1 = generated[:, 0]
     gen_v2 = generated[:, 1]
     raw_v1 = [d[0] for d in data_raw]
@@ -127,9 +184,9 @@ def plot(generated, data_raw, data_raw_unthinned, it):
     ax_thinning = ax_joint.twinx()
     ax_thinning.plot(grid_x, thinning_fn(grid_x, is_tf=False), color='red', alpha=0.3)
     ax_marg_x.hist([raw_v1, gen_v1], bins=30, color=['gray', 'blue'],
-        label=['d', 'g'], alpha=0.3, normed=True)
+        label=['data', 'gen'], alpha=0.3, normed=True)
     ax_marg_y.hist([raw_v2, gen_v2], bins=30, color=['gray', 'blue'],
-        label=['d', 'g'], orientation="horizontal", alpha=0.3, normed=True)
+        label=['data', 'gen'], orientation="horizontal", alpha=0.3, normed=True)
     ax_marg_x.legend()
     ax_marg_y.legend()
 
@@ -158,6 +215,8 @@ def plot(generated, data_raw, data_raw_unthinned, it):
     plt.setp(ax_raw_marg_x.get_xticklabels(), visible=False)
     plt.setp(ax_raw_marg_y.get_yticklabels(), visible=False)
     ########
+
+    plt.suptitle('cgan. it: {}, mmd_gen_vs_unthinned: {}'.format(it, mmd_gen_vs_unthinned))
 
     plt.savefig('{}/{}.png'.format(log_dir, it))
     plt.close()
@@ -262,7 +321,7 @@ if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 
 # train()
-for it in range(50000):
+for it in range(max_iter):
     x_batch, y_batch = sample_data(data_normed, mb_size)
     z_batch = get_sample_z(mb_size, z_dim)
 
@@ -282,60 +341,37 @@ for it in range(50000):
                 y: y_batch})
 
     if it % log_iter == 0:
-        print("#################")
-        print('Iter: {}'.format(it))
-        #print('  d_logit_real: {}'.format(d_logit_real_[:5]))
-        #print('  d_logit_fake: {}'.format(d_logit_fake_[:5]))
-        print('  d_loss: {:.4}'.format(d_loss_))
-        print('  g_loss: {:.4}'.format(g_loss_))
-
-        n_sample = 5000
+        n_sample = 10000
         z_sample = get_sample_z(n_sample, z_dim)
 
         # SAMPLE FROM CONDITIONAL, REGULATED BY THINNING_FN.
-        # TODO: Figure out how I'm supposed to sample from P, given marginal of x on TP, and T(x).
-        if data_set == 'circle':
-            pass
-        elif data_set == 'bar':
-            #x_sample_ = np.random.uniform(0., 6, n_sample)  # Unnormed.
-            #x_sample_thinned = np.reshape(np.random.choice(x_sample_, 1), [-1, 1])  # Unnormed, thinned.
-            #while len(x_sample_thinned) < n_sample:
-            #    samp = np.random.choice((x_sample_), 1)
-            #    if np.random.binomial(1, thinning_fn(samp[0], is_tf=False)):
-            #        x_sample_thinned = np.concatenate((x_sample_thinned, [samp]), axis=0)
-            # At this point, x_sample_thinned is
-
-            #x_sample = (x_sample_thinned - data_raw_mean[0]) / data_raw_std[0]  # Normed.
-            raw_marg_x = data_raw[:, 0]
-            #subset_indices = np.random.choice(data_num, n_sample)
-            #subset_x = raw_marg_x[subset_indices]
-            thinning_fn_x = thinning_fn(raw_marg_x, is_tf=False)
-            weights_x = 1. / thinning_fn_x
-            weights_x_sum_normalized = weights_x / np.sum(weights_x)
-            x_sample_unnormed = np.random.choice(raw_marg_x, size=n_sample,
-                p=weights_x_sum_normalized)
-            x_sample = np.reshape(
-                (x_sample_unnormed - data_raw_mean[0]) / data_raw_std[0],  # Normed.
-                [-1, 1])
-
-        elif data_set == 'horseshoe':
-            latent_ = np.random.gamma(4., 8., n_sample)
-            v1_ = np.zeros(shape=(n_sample, 1))  # Height
-            for i in range(n_sample):
-                v1_mean_ = -0.00003 * np.exp(-1.0 * (0.13 * latent_[i] - 12)) + 5.5
-                v1_[i] = np.random.normal(v1_mean_, 0.1)  # Height
-            x_sample_unnormed = v1_
-            x_sample = (x_sample_unnormed - data_raw_mean[0]) / data_raw_std[0]
-        #x_sample = [candidate for candidate in x_sample if
-        #    np.random.binomial(1, thinning_fn(candidate, is_tf=False))]
+        raw_marg_x = data_raw[:, 0]
+        thinning_fn_x = thinning_fn(raw_marg_x, is_tf=False)
+        weights_x = 1. / thinning_fn_x
+        weights_x_sum_normalized = weights_x / np.sum(weights_x)
+        x_sample_unnormed = np.random.choice(raw_marg_x, size=n_sample,
+            p=weights_x_sum_normalized)
+        x_sample = np.reshape(
+            (x_sample_unnormed - data_raw_mean[0]) / data_raw_std[0],  # Normed.
+            [-1, 1])
 
         g_out = sess.run(g, feed_dict={z: z_sample[:len(x_sample)], x: x_sample})
         generated_normed = np.hstack((x_sample, g_out))
         generated = np.array(generated_normed) * data_raw_std[:2] + data_raw_mean[:2]
 
+        mmd_gen_vs_unthinned, _ = compute_mmd(
+            generated[np.random.choice(n_sample, 500)],
+            data_raw_unthinned[np.random.choice(data_num, 500)])
+
+        fig = plot(generated, data_raw, data_raw_unthinned, it, mmd_gen_vs_unthinned)
+
         # Print diagnostics.
+        print("#################")
+        print('Iter: {}'.format(it))
+        print('  d_loss: {:.4}'.format(d_loss_))
+        print('  g_loss: {:.4}'.format(g_loss_))
+        print('  mmd_gen_vs_unthinned: {:.4}'.format(mmd_gen_vs_unthinned))
         print(data_raw[np.random.choice(data_num, 5), :])
         print
         print(generated[:5])
 
-        fig = plot(generated, data_raw, data_raw_unthinned, it)
