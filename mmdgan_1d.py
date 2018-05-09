@@ -29,7 +29,7 @@ x_dim = 1
 h_dim = 3
 learning_rate = 1e-3
 log_iter = 1000
-log_dir = 'mmdgan1d_out_{}'.format(tag)
+log_dir = 'results/mmdgan1d_{}'.format(tag)
 
 
 def generate_data(n):

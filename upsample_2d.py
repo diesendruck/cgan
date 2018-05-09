@@ -1,4 +1,3 @@
-import argparse
 import tensorflow as tf
 layers = tf.layers
 from tensorflow.examples.tutorials.mnist import input_data
@@ -10,27 +9,20 @@ import os
 import pdb
 import seaborn as sns
 from matplotlib.gridspec import GridSpec
+import sys
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--tag', type=str, default='test')
-parser.add_argument('--weighted', default=False, action='store_true', dest='weighted',
-                    help='Chooses whether Vanilla GAN or IW-GAN.')
-parser.add_argument('--do_p', default=False, action='store_true', dest='do_p',
-                    help='Choose whether to use P, instead of TP')
-args = parser.parse_args()
-tag = args.tag
-weighted = args.weighted
-do_p = args.do_p
+tag = 'bar'
+data_set = 'bar'
 data_num = 10000
-batch_size = 1024 
-z_dim = 10  # Latent (Age)
-x_dim = 1  # Label (Height)
-y_dim = 1  # Data (Income)
+mb_size = 1024  # 128
+z_dim = 10  # 5
+x_dim = 1
+y_dim = 1
 h_dim = 5
 learning_rate = 1e-4
 log_iter = 1000
-log_dir = 'results/iwgan_{}'.format(tag)
+log_dir = 'results/upsample_{}'.format(tag)
 max_iter = 100000
 
 
@@ -60,51 +52,54 @@ def generate_data(n):
         out = np.reshape([v1, v2], [1, -1])
         return out
 
-    sampling_fn = gen_from_angled_bar
-    #sampling_fn = gen_from_horseshoe
+    if data_set == 'circle':
+        sampling_fn = gen_from_filled_circle
+    elif data_set == 'bar':
+        sampling_fn = gen_from_angled_bar
+    elif data_set == 'horseshoe':
+        sampling_fn = gen_from_horseshoe
+    else:
+        raise ValueError('data_set selection not found')
+        sys.exit()
 
+    # Fill array for unthinned.
     data_raw_unthinned = np.zeros((n, 2))
-    data_raw = sampling_fn()
     for i in range(n):
         data_raw_unthinned[i] = sampling_fn()
+
+    # Then construct through biased sampling.
+    data_raw = sampling_fn()
     while len(data_raw) < n:
         out_xyl = sampling_fn()
         if np.random.binomial(1, thinning_fn(out_xyl[0][0], is_tf=False)):
             data_raw = np.concatenate((data_raw, out_xyl), axis=0)
 
+    # Make upsampled set.
+    # Given the thinned set, for each point, compute its weight, round to
+    # nearest integer "k", and add k-1 repetitions, making k of that value.
+    for val in data_raw:
+        k = int(round(1. / thinning_fn(val[0], is_tf=False)))
+        data_raw = np.concatenate((data_raw, np.tile(val, [k, 1])))
+    data_raw_upsampled = np.random.permutation(data_raw)
+
     data_raw_mean = np.mean(data_raw, axis=0)
     data_raw_std = np.std(data_raw, axis=0)
-    data_normed = (data_raw - data_raw_mean) / data_raw_std 
-    return data_normed, data_raw, data_raw_mean, data_raw_std, data_raw_unthinned
+    data_normed = (data_raw_upsampled - data_raw_mean) / data_raw_std
+
+    #data_raw_mean = np.mean(data_raw_upsampled, axis=0)
+    #data_raw_std = np.std(data_raw_upsampled, axis=0)
+    #data_normed = (data_raw_upsampled - data_raw_mean) / data_raw_std
+
+    return (data_normed, data_raw, data_raw_mean, data_raw_std,
+            data_raw_unthinned, data_raw_upsampled)
 
 
-def thinning_fn(inputs, is_tf=True):
-    """Thinning on x only (height). Inputs is a vector of x values."""
-    if is_tf:
-        return 0.9 / (1. + tf.exp(-0.95 * (inputs - 3.))) + 0.1
-    else:
-        return 0.9 / (1. + np.exp(-0.95 * (inputs - 3.))) + 0.1
-
-
-###############################################################################
-# Load data.
-data_normed, data_raw, data_raw_mean, data_raw_std, data_raw_unthinned = \
-    generate_data(data_num)
-if do_p:
-    data_normed = to_normed(data_raw_unthinned)
-    data_raw = data_raw_unthinned
-###############################################################################
-
-
-def sample_data(data, batch_size, weighted=weighted):
+def sample_data(data, batch_size):
     assert data.shape[1] == 2, 'data shape not 2'
     idxs = np.random.choice(data_num, batch_size)
     batch_x = np.reshape(data[idxs, 0], [-1, 1])
     batch_y = np.reshape(data[idxs, 1], [-1, 1])
-    weights = None
-    if weighted:
-        weights = global_weights[idxs]
-    return batch_x, batch_y, weights
+    return batch_x, batch_y
 
 
 def sigmoid_cross_entropy_with_logits(logits, labels):
@@ -170,13 +165,19 @@ def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False):
         return mmd, exp_object
 
 
-def plot(generated, data_raw, data_raw_unthinned, it, mmd_gen_vs_unthinned):
-    gen_v1 = generated[:, 0] 
-    gen_v2 = generated[:, 1] 
+def plot(generated, data_raw, data_raw_unthinned, data_raw_upsampled, it,
+        mmd_gen_vs_unthinned):
+    gen_v1 = generated[:, 0]
+    gen_v2 = generated[:, 1]
     raw_v1 = [d[0] for d in data_raw]
     raw_v2 = [d[1] for d in data_raw]
     raw_unthinned_v1 = [d[0] for d in data_raw_unthinned]
     raw_unthinned_v2 = [d[1] for d in data_raw_unthinned]
+    raw_upsampled_v1 = [d[0] for d in data_raw_upsampled]
+    raw_upsampled_v2 = [d[1] for d in data_raw_upsampled]
+
+    # Will use normalized data for evaluation of D.
+    data_normed = (data_raw - data_raw_mean) / data_raw_std
 
     # Evaluate D on grid.
     grid_gran = 20
@@ -213,6 +214,14 @@ def plot(generated, data_raw, data_raw_unthinned, it, mmd_gen_vs_unthinned):
     plt.setp(ax_marg_x.get_xticklabels(), visible=False)
     plt.setp(ax_marg_y.get_yticklabels(), visible=False)
 
+    # Set labels on joint
+    #ax_joint.set_xlabel('Joint: height (ft)')
+    #ax_joint.set_ylabel('Joint: income ($)')
+
+    # Set labels on marginals
+    #ax_marg_y.set_xlabel('Marginal: income')
+    #ax_marg_x.set_ylabel('Marginal: height')
+
     ########
     # EVEN MORE PLOTTING.
     ax_raw = fig.add_subplot(gs[5:8, 0:3], sharex=ax_joint)
@@ -227,34 +236,10 @@ def plot(generated, data_raw, data_raw_unthinned, it, mmd_gen_vs_unthinned):
     plt.setp(ax_raw_marg_y.get_yticklabels(), visible=False)
     ########
 
-    plt.suptitle('iwgan. it: {}, mmd_gen_vs_unthinned: {}'.format(it, mmd_gen_vs_unthinned))
+    plt.suptitle('upsample-gan. it: {}, mmd_gen_vs_unthinned: {}'.format(it, mmd_gen_vs_unthinned))
 
     plt.savefig('{}/{}.png'.format(log_dir, it))
     plt.close()
-
-
-def get_sample_z(m, n):
-    return np.random.normal(0., 1., size=[m, n])
-
-
-def run_discrim(x_in, y_in):
-    x_in = np.reshape(x_in, [-1, 1])
-    y_in = np.reshape(y_in, [-1, 1])
-    return sess.run(d_real_sample, feed_dict={x_sample: x_in, y_sample: y_in}) 
-
-
-def to_raw(d, index=None):
-    if index:
-        return d * data_raw_std[index] + data_raw_mean[index]
-    else:
-        return d * data_raw_std + data_raw_mean
-
-
-def to_normed(d, index=None):
-    if index:
-        return (d - data_raw_mean[index]) /  data_raw_std[index]
-    else:
-        return (d - data_raw_mean) /  data_raw_std
 
 
 ################################################################################
@@ -272,9 +257,6 @@ def discriminator(inputs, reuse=False):
     with tf.variable_scope('discriminator', reuse=reuse) as d_vs:
         layer = dense(inputs, h_dim, activation=tf.nn.elu)
         layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
-        layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
-        layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
-        layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
         d_logit = dense(layer, 1, activation=None)
         d_prob = tf.nn.sigmoid(d_logit)
     d_vars = tf.contrib.framework.get_variables(d_vs)
@@ -282,53 +264,50 @@ def discriminator(inputs, reuse=False):
 
 
 def generator(z, reuse=False):
-    #inputs = tf.concat(axis=1, values=[z, x])
     with tf.variable_scope('generator', reuse=reuse) as g_vs:
         layer = dense(z, h_dim, activation=tf.nn.elu)
         layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
-        layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
-        layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
-        layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
-        g = dense(layer, x_dim + y_dim, activation=None)  # Outputing xy pairs.
+        g = dense(layer, x_dim + y_dim, activation=None)
     g_vars = tf.contrib.framework.get_variables(g_vs)
     return g, g_vars
 
 
+def run_discrim(x_in, y_in):
+    x_in = np.reshape(x_in, [-1, 1])
+    y_in = np.reshape(y_in, [-1, 1])
+    return sess.run(d_real, feed_dict={x: x_in, y: y_in}) 
+
+
+def get_sample_z(m, n):
+    return np.random.normal(0., 1., size=[m, n])
+
+
+def thinning_fn(inputs, is_tf=True): 
+    """In 2D case, thinning based on x only. Inputs is a vector of x values."""
+    if is_tf:
+        return 0.99 / (1. + tf.exp(-0.95 * (inputs - 3.))) + 0.01
+    else:
+        return 0.99 / (1. + np.exp(-0.95 * (inputs - 3.))) + 0.01
+
+
 # Beginning of graph.
-z = tf.placeholder(tf.float32, shape=[batch_size, z_dim], name='z')
-w = tf.placeholder(tf.float32, shape=[batch_size, 1], name='weights')
-x = tf.placeholder(tf.float32, shape=[batch_size, x_dim], name='x')
-y = tf.placeholder(tf.float32, shape=[batch_size, y_dim], name='y')
+z = tf.placeholder(tf.float32, shape=[None, z_dim], name='z')
+x = tf.placeholder(tf.float32, shape=[None, x_dim], name='x')
+y = tf.placeholder(tf.float32, shape=[None, y_dim], name='y')
 real = tf.concat([x, y], axis=1)
 
 g, g_vars = generator(z, reuse=False)
 d_real, d_logit_real, d_vars = discriminator(real, reuse=False)
 d_fake, d_logit_fake, _ = discriminator(g, reuse=True)
 
-# Separate callable nodes for arbitrarily sized inputs.
-z_sample = tf.placeholder(tf.float32, shape=[None, z_dim], name='z_sample')
-x_sample = tf.placeholder(tf.float32, shape=[None, x_dim], name='x_sample')
-y_sample = tf.placeholder(tf.float32, shape=[None, y_dim], name='y_sample')
-real_sample = tf.concat([x_sample, y_sample], axis=1)
-g_sample, _ = generator(z_sample, reuse=True)
-d_real_sample, _, _ = discriminator(real_sample, reuse=True)
-
-# Define losses.
 errors_real = sigmoid_cross_entropy_with_logits(d_logit_real,
     tf.ones_like(d_logit_real))
 errors_fake = sigmoid_cross_entropy_with_logits(d_logit_fake,
     tf.zeros_like(d_logit_fake))
-if weighted:
-    x_unnormed = x * data_raw_std[0] + data_raw_mean[0]
-    weights_x = 1. / thinning_fn(x_unnormed)
-    weights_x_sum_normalized = weights_x / tf.reduce_sum(weights_x)
-    d_loss_real = tf.reduce_sum(weights_x_sum_normalized * errors_real)
-    #w_normed = w / tf.reduce_sum(w) 
-    #d_loss_real = tf.reduce_sum(w_normed * errors_real)
-else:
-    d_loss_real = tf.reduce_mean(errors_real)
+d_loss_real = tf.reduce_mean(errors_real)
 d_loss_fake = tf.reduce_mean(errors_fake)
 
+# Assemble losses.
 d_loss = d_loss_real + d_loss_fake
 g_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
     logits=d_logit_fake, labels=tf.ones_like(d_logit_fake)))
@@ -336,26 +315,23 @@ g_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
 # Set optim nodes.
 clip = 0
 if clip:
-    d_opt = tf.train.RMSPropOptimizer(learning_rate=learning_rate)
+    d_opt = tf.train.AdamOptimizer(learning_rate=learning_rate)
     d_grads_, d_vars_ = zip(*d_opt.compute_gradients(d_loss, var_list=d_vars))
     d_grads_clipped_ = tuple(
         [tf.clip_by_value(grad, -0.01, 0.01) for grad in d_grads_])
     d_optim = d_opt.apply_gradients(zip(d_grads_clipped_, d_vars_))
 else:
-    d_optim = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(
+    d_optim = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(
         d_loss, var_list=d_vars)
-g_optim = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(
+g_optim = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(
     g_loss, var_list=g_vars)
+
 # End: Build model.
 ################################################################################
 
-
-# Compute global approximation of weights (1/~T(x)).
-global_weights = []
-for v in data_normed:
-    global_weights.append(1. / thinning_fn(to_raw(v)[0], is_tf=False))
-global_weights = np.reshape(np.array(
-    global_weights * data_num / np.sum(global_weights)), [-1, 1])
+# Load data.
+(data_normed, data_raw, data_raw_mean, data_raw_std, data_raw_unthinned,
+    data_raw_upsampled) = generate_data(data_num)
 
 # Start session.
 sess = tf.Session()
@@ -366,45 +342,42 @@ if not os.path.exists(log_dir):
 
 # train()
 for it in range(max_iter):
-    x_batch, y_batch, weights_batch = sample_data(
-        data_normed, batch_size, weighted=weighted)
-    z_batch = get_sample_z(batch_size, z_dim)
-
-    if weighted:
-        fetch_dict = {
-            x: x_batch,
-            z: z_batch,
-            y: y_batch,
-            w: weights_batch}
-    else:
-        fetch_dict = {
-            x: x_batch,
-            z: z_batch,
-            y: y_batch}
+    x_batch, y_batch = sample_data(data_normed, mb_size)
+    z_batch = get_sample_z(mb_size, z_dim)
 
     for _ in range(5):
         _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
-            [d_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
-            fetch_dict)
+                [d_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
+            feed_dict={
+                x: x_batch,
+                y: y_batch,
+                z: z_batch})
     for _ in range(1):
         _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
-            [g_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
-            fetch_dict)
+                [g_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
+            feed_dict={
+                x: x_batch,
+                y: y_batch,
+                z: z_batch})
 
     if it % log_iter == 0:
         n_sample = 10000
-        z_sample_input = get_sample_z(n_sample, z_dim)
-        g_out = sess.run(g_sample, feed_dict={z_sample: z_sample_input})
-        generated = np.array(g_out) * data_raw_std[:2] + data_raw_mean[:2]
+        z_sample = get_sample_z(n_sample, z_dim)
+
+        g_out = sess.run(g, feed_dict={z: z_sample})
+        generated_normed = g_out
+        generated = np.array(generated_normed) * data_raw_std[:2] + data_raw_mean[:2]
+
         mmd_gen_vs_unthinned, _ = compute_mmd(
             generated[np.random.choice(n_sample, 500)],
             data_raw_unthinned[np.random.choice(data_num, 500)])
 
-        fig = plot(generated, data_raw, data_raw_unthinned, it, mmd_gen_vs_unthinned)
+        fig = plot(generated, data_raw, data_raw_unthinned, data_raw_upsampled,
+            it, mmd_gen_vs_unthinned)
 
         # Print diagnostics.
         print("#################")
-        print('Iter: {}, lr={}'.format(it, learning_rate))
+        print('Iter: {}'.format(it))
         print('  d_loss: {:.4}'.format(d_loss_))
         print('  g_loss: {:.4}'.format(g_loss_))
         print('  mmd_gen_vs_unthinned: {:.4}'.format(mmd_gen_vs_unthinned))
@@ -413,18 +386,3 @@ for it in range(max_iter):
         print(generated[:5])
         with open(os.path.join(log_dir, 'scores.txt'), 'a') as f:
             f.write(str(mmd_gen_vs_unthinned)+'\n')
-
-        # Diagnostics for thinning_fn.
-        thin_diag = 0
-        if thin_diag:
-            errors_real_, weights_x_, d_loss_real_ = sess.run(
-                [errors_real, weights_x, d_loss_real],
-                feed_dict={
-                    x: x_batch[:5],
-                    y: y_batch[:5]})
-            print
-            print(x_batch[:5] * data_raw_std[0] + data_raw_mean[0])
-            print(errors_real_)
-            print(weights_x_)
-            print(d_loss_real_)
-            pdb.set_trace()

@@ -30,7 +30,7 @@ y_dim = 1  # Data (Income)
 h_dim = 5
 learning_rate_init = 1e-2
 log_iter = 1000
-log_dir = 'mmdgan_out_{}'.format(tag)
+log_dir = 'results/mmdgan_{}'.format(tag)
 
 
 def generate_data(n):

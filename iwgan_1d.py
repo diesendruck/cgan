@@ -28,7 +28,7 @@ x_dim = 1
 h_dim = 3
 learning_rate = 1e-4
 log_iter = 1000
-log_dir = 'iwgan1d_out_{}'.format(tag)
+log_dir = 'results/iwgan1d_{}'.format(tag)
 
 
 def generate_data(n):

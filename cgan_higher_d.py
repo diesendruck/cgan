@@ -12,17 +12,16 @@ from matplotlib.gridspec import GridSpec
 import sys
 
 
-tag = 'bar'
-data_set = 'bar'
+tag = 'test'
 data_num = 10000
 mb_size = 1024  # 128
 z_dim = 10  # 5
-x_dim = 1
-y_dim = 1
-h_dim = 5
+x_dim = 1  # ALWAYS 1. Label (first column of data).
+y_dim = 3  # Rest of data (rest of the columns)
+h_dim = 10
 learning_rate = 1e-4
 log_iter = 1000
-log_dir = 'results/cgan_{}'.format(tag)
+log_dir = 'results/cgan_higher_d_{}'.format(tag)
 max_iter = 100000
 
 
@@ -52,17 +51,18 @@ def generate_data(n):
         out = np.reshape([v1, v2], [1, -1])
         return out
 
-    if data_set == 'circle':
-        sampling_fn = gen_from_filled_circle
-    elif data_set == 'bar':
-        sampling_fn = gen_from_angled_bar
-    elif data_set == 'horseshoe':
-        sampling_fn = gen_from_horseshoe
-    else:
-        raise ValueError('data_set selection not found')
-        sys.exit()
+    def gen_higher_d():
+        v1 = np.random.uniform(0., 6)
+        y_mean = np.random.normal(v1, 1, size=y_dim)
+        y_cov = v1 / 6. * np.identity(y_dim)
+        v2 = np.random.multivariate_normal(y_mean, y_cov)
+        out = np.concatenate((
+            np.reshape(v1, [1, -1]), np.reshape(v2, [1, -1])), axis=1)
+        return out
 
-    data_raw_unthinned = np.zeros((n, 2))
+    sampling_fn = gen_higher_d
+
+    data_raw_unthinned = np.zeros((n, x_dim + y_dim))
     data_raw = sampling_fn()
     for i in range(n):
         data_raw_unthinned[i] = sampling_fn()
@@ -78,10 +78,10 @@ def generate_data(n):
 
 
 def sample_data(data, batch_size):
-    assert data.shape[1] == 2, 'data shape not 2'
+    assert data.shape[1] == x_dim + y_dim, 'data shape not x_dim + y_dim'
     idxs = np.random.choice(data_num, batch_size)
     batch_x = np.reshape(data[idxs, 0], [-1, 1])
-    batch_y = np.reshape(data[idxs, 1], [-1, 1])
+    batch_y = np.reshape(data[idxs, 1:], [-1, y_dim])
     return batch_x, batch_y
 
 
@@ -149,77 +149,77 @@ def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False):
 
 
 def plot(generated, data_raw, data_raw_unthinned, it, mmd_gen_vs_unthinned):
-    gen_v1 = generated[:, 0]
-    gen_v2 = generated[:, 1]
-    raw_v1 = [d[0] for d in data_raw]
-    raw_v2 = [d[1] for d in data_raw]
-    raw_unthinned_v1 = [d[0] for d in data_raw_unthinned]
-    raw_unthinned_v2 = [d[1] for d in data_raw_unthinned]
+    if generated.shape[1] == 2:
+        gen_v1 = generated[:, 0]
+        gen_v2 = generated[:, 1]
+        raw_v1 = [d[0] for d in data_raw]
+        raw_v2 = [d[1] for d in data_raw]
+        raw_unthinned_v1 = [d[0] for d in data_raw_unthinned]
+        raw_unthinned_v2 = [d[1] for d in data_raw_unthinned]
 
-    # Will use normalized data for evaluation of D.
-    data_normed = (data_raw - data_raw_mean) / data_raw_std
+        # Will use normalized data for evaluation of D.
+        data_normed = (data_raw - data_raw_mean) / data_raw_std
 
-    # Evaluate D on grid.
-    grid_gran = 20
-    grid_x = np.linspace(min(data_raw[:, 0]), max(data_raw[:, 0]), grid_gran)
-    grid_y = np.linspace(min(data_raw[:, 1]), max(data_raw[:, 1]), grid_gran)
-    vals_on_grid = np.zeros((grid_gran, grid_gran))
-    for i in range(grid_gran):
-        for j in range(grid_gran):
-            grid_x_normed = (grid_x[i] - data_raw_mean[0]) / data_raw_std[0]
-            grid_y_normed = (grid_y[j] - data_raw_mean[0]) / data_raw_std[0]
-            vals_on_grid[i][j] = run_discrim(grid_x_normed, grid_y_normed)
+        # Evaluate D on grid.
+        grid_gran = 20
+        grid_x = np.linspace(min(data_raw[:, 0]), max(data_raw[:, 0]), grid_gran)
+        grid_y = np.linspace(min(data_raw[:, 1]), max(data_raw[:, 1]), grid_gran)
+        vals_on_grid = np.zeros((grid_gran, grid_gran))
+        for i in range(grid_gran):
+            for j in range(grid_gran):
+                grid_x_normed = (grid_x[i] - data_raw_mean[0]) / data_raw_std[0]
+                grid_y_normed = (grid_y[j] - data_raw_mean[0]) / data_raw_std[0]
+                vals_on_grid[i][j] = run_discrim(grid_x_normed, grid_y_normed)
 
-    fig = plt.figure()
-    gs = GridSpec(8, 4)
-    ax_joint = fig.add_subplot(gs[1:4, 0:3])
-    ax_marg_x = fig.add_subplot(gs[0, 0:3], sharex=ax_joint)
-    ax_marg_y = fig.add_subplot(gs[1:4, 3], sharey=ax_joint)
+        fig = plt.figure()
+        gs = GridSpec(8, 4)
+        ax_joint = fig.add_subplot(gs[1:4, 0:3])
+        ax_marg_x = fig.add_subplot(gs[0, 0:3], sharex=ax_joint)
+        ax_marg_y = fig.add_subplot(gs[1:4, 3], sharey=ax_joint)
 
-    ax_joint.scatter(raw_v1, raw_v2, c='gray', alpha=0.1)
-    ax_joint.scatter(gen_v1, gen_v2, alpha=0.3)
-    ax_joint.set_aspect('auto')
-    ax_joint.imshow(vals_on_grid, interpolation='nearest', origin='lower', alpha=0.3, aspect='auto',
-        extent=[grid_x.min(), grid_x.max(), grid_y.min(), grid_y.max()])
-    ax_thinning = ax_joint.twinx()
-    ax_thinning.plot(grid_x, thinning_fn(grid_x, is_tf=False), color='red', alpha=0.3)
-    ax_marg_x.hist([raw_v1, gen_v1], bins=30, color=['gray', 'blue'],
-        label=['data', 'gen'], alpha=0.3, normed=True)
-    ax_marg_y.hist([raw_v2, gen_v2], bins=30, color=['gray', 'blue'],
-        label=['data', 'gen'], orientation="horizontal", alpha=0.3, normed=True)
-    ax_marg_x.legend()
-    ax_marg_y.legend()
+        ax_joint.scatter(raw_v1, raw_v2, c='gray', alpha=0.1)
+        ax_joint.scatter(gen_v1, gen_v2, alpha=0.3)
+        ax_joint.set_aspect('auto')
+        ax_joint.imshow(vals_on_grid, interpolation='nearest', origin='lower', alpha=0.3, aspect='auto',
+            extent=[grid_x.min(), grid_x.max(), grid_y.min(), grid_y.max()])
+        ax_thinning = ax_joint.twinx()
+        ax_thinning.plot(grid_x, thinning_fn(grid_x, is_tf=False), color='red', alpha=0.3)
+        ax_marg_x.hist([raw_v1, gen_v1], bins=30, color=['gray', 'blue'],
+            label=['data', 'gen'], alpha=0.3, normed=True)
+        ax_marg_y.hist([raw_v2, gen_v2], bins=30, color=['gray', 'blue'],
+            label=['data', 'gen'], orientation="horizontal", alpha=0.3, normed=True)
+        ax_marg_x.legend()
+        ax_marg_y.legend()
 
-    # Turn off tick labels on marginals
-    plt.setp(ax_marg_x.get_xticklabels(), visible=False)
-    plt.setp(ax_marg_y.get_yticklabels(), visible=False)
+        # Turn off tick labels on marginals
+        plt.setp(ax_marg_x.get_xticklabels(), visible=False)
+        plt.setp(ax_marg_y.get_yticklabels(), visible=False)
 
-    # Set labels on joint
-    #ax_joint.set_xlabel('Joint: height (ft)')
-    #ax_joint.set_ylabel('Joint: income ($)')
+        ########
+        # EVEN MORE PLOTTING.
+        ax_raw = fig.add_subplot(gs[5:8, 0:3], sharex=ax_joint)
+        ax_raw_marg_x = fig.add_subplot(gs[4, 0:3], sharex=ax_raw)
+        ax_raw_marg_y = fig.add_subplot(gs[5:8, 3], sharey=ax_raw)
+        ax_raw.scatter(raw_unthinned_v1, raw_unthinned_v2, c='gray', alpha=0.1)
+        ax_raw_marg_x.hist(raw_unthinned_v1, bins=30, color='gray',
+            label='d', alpha=0.3, normed=True)
+        ax_raw_marg_y.hist(raw_unthinned_v2, bins=30, color='gray',
+            label='d', orientation="horizontal", alpha=0.3, normed=True)
+        plt.setp(ax_raw_marg_x.get_xticklabels(), visible=False)
+        plt.setp(ax_raw_marg_y.get_yticklabels(), visible=False)
+        ########
 
-    # Set labels on marginals
-    #ax_marg_y.set_xlabel('Marginal: income')
-    #ax_marg_x.set_ylabel('Marginal: height')
+        plt.suptitle('cgan. it: {}, mmd_gen_vs_unthinned: {}'.format(it, mmd_gen_vs_unthinned))
 
-    ########
-    # EVEN MORE PLOTTING.
-    ax_raw = fig.add_subplot(gs[5:8, 0:3], sharex=ax_joint)
-    ax_raw_marg_x = fig.add_subplot(gs[4, 0:3], sharex=ax_raw)
-    ax_raw_marg_y = fig.add_subplot(gs[5:8, 3], sharey=ax_raw)
-    ax_raw.scatter(raw_unthinned_v1, raw_unthinned_v2, c='gray', alpha=0.1)
-    ax_raw_marg_x.hist(raw_unthinned_v1, bins=30, color='gray',
-        label='d', alpha=0.3, normed=True)
-    ax_raw_marg_y.hist(raw_unthinned_v2, bins=30, color='gray',
-        label='d', orientation="horizontal", alpha=0.3, normed=True)
-    plt.setp(ax_raw_marg_x.get_xticklabels(), visible=False)
-    plt.setp(ax_raw_marg_y.get_yticklabels(), visible=False)
-    ########
+        plt.savefig('{}/{}.png'.format(log_dir, it))
+        plt.close()
 
-    plt.suptitle('cgan. it: {}, mmd_gen_vs_unthinned: {}'.format(it, mmd_gen_vs_unthinned))
-
-    plt.savefig('{}/{}.png'.format(log_dir, it))
-    plt.close()
+    else:
+        plt.hist([data_raw[:, 0], generated[:, 0]], color=['gray', 'blue'],
+            label=['data', 'gen'], bins=30, normed=True, alpha=0.3)
+        plt.legend()
+        plt.savefig('{}/{}.png'.format(log_dir, it))
+        plt.close()
 
 
 ################################################################################
@@ -234,7 +234,7 @@ def dense(x, width, activation, batch_residual=False):
 
 
 def discriminator(x, y, reuse=False):
-    inputs = tf.concat(axis=1, values=[x, y])
+    inputs = tf.concat([x, y], axis=1)
     with tf.variable_scope('discriminator', reuse=reuse) as d_vs:
         layer = dense(inputs, h_dim, activation=tf.nn.elu)
         layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
@@ -245,7 +245,7 @@ def discriminator(x, y, reuse=False):
 
 
 def generator(z, x, reuse=False):
-    inputs = tf.concat(axis=1, values=[z, x])
+    inputs = tf.concat([z, x], axis=1)
     with tf.variable_scope('generator', reuse=reuse) as g_vs:
         layer = dense(inputs, h_dim, activation=tf.nn.elu)
         layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
@@ -329,15 +329,15 @@ for it in range(max_iter):
         _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
                 [d_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
             feed_dict={
-                x: x_batch,
                 z: z_batch,
+                x: x_batch,
                 y: y_batch})
     for _ in range(1):
         _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
                 [g_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
             feed_dict={
-                x: x_batch,
                 z: z_batch,
+                x: x_batch,
                 y: y_batch})
 
     if it % log_iter == 0:
@@ -357,7 +357,7 @@ for it in range(max_iter):
 
         g_out = sess.run(g, feed_dict={z: z_sample[:len(x_sample)], x: x_sample})
         generated_normed = np.hstack((x_sample, g_out))
-        generated = np.array(generated_normed) * data_raw_std[:2] + data_raw_mean[:2]
+        generated = np.array(generated_normed) * data_raw_std + data_raw_mean
 
         mmd_gen_vs_unthinned, _ = compute_mmd(
             generated[np.random.choice(n_sample, 500)],
