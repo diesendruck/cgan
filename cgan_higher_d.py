@@ -12,17 +12,17 @@ from matplotlib.gridspec import GridSpec
 import sys
 
 
-tag = 'newlogs_bigger'
+tag = 'newlogs_10'
 data_num = 10000
 mb_size = 1024  # 128
 z_dim = 10  # 5
 x_dim = 1  # ALWAYS 1. Label (first column of data).
-y_dim = 49  # Rest of data (rest of the columns)
-h_dim = 10
+y_dim = 9  # Rest of data (rest of the columns)
+h_dim = 100
 learning_rate = 1e-4
 log_iter = 1000
 log_dir = 'results/cgan_higher_d_{}'.format(tag)
-max_iter = 50000
+max_iter = 100000
 
 
 def generate_data(n):
@@ -370,6 +370,8 @@ for it in range(max_iter):
             mmd_gen_vs_unthinned)
 
         # Print diagnostics.
+        if np.isnan(d_loss_):
+            sys.exit('got nan')
         print("#################")
         print('Iter: {}'.format(it))
         print('  d_loss: {:.4}'.format(d_loss_))

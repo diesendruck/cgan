@@ -27,12 +27,12 @@ do_p = args.do_p
 data_num = 10000
 batch_size = 1024 
 z_dim = 10  # Latent (Age)
-x_dim = 50
-h_dim = 10 
+x_dim = 10
+h_dim = 100
 learning_rate = 1e-4
 log_iter = 1000
 log_dir = 'results/iwgan_higher_d_{}'.format(tag)
-max_iter = 50000
+max_iter = 100000
 
 
 def generate_data(n):
@@ -121,9 +121,9 @@ def sample_data(data, batch_size, weighted=weighted):
 def thinning_fn(inputs, is_tf=True):
     """Thinning on x only (height). Inputs is a vector of x values."""
     if is_tf:
-        return 0.9 / (1. + tf.exp(-0.95 * (inputs - 3.))) + 0.1
+        return 0.99 / (1. + tf.exp(-0.95 * (inputs - 3.))) + 0.01
     else:
-        return 0.9 / (1. + np.exp(-0.95 * (inputs - 3.))) + 0.1
+        return 0.99 / (1. + np.exp(-0.95 * (inputs - 3.))) + 0.01
 
 
 ###############################################################################
@@ -309,9 +309,7 @@ def discriminator(inputs, reuse=False):
     with tf.variable_scope('discriminator', reuse=reuse) as d_vs:
         layer = dense(inputs, h_dim, activation=tf.nn.elu)
         layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
-        layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
-        layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
-        layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
+
         d_logit = dense(layer, 1, activation=None)
         d_prob = tf.nn.sigmoid(d_logit)
     d_vars = tf.contrib.framework.get_variables(d_vs)
@@ -322,9 +320,7 @@ def generator(z, reuse=False):
     with tf.variable_scope('generator', reuse=reuse) as g_vs:
         layer = dense(z, h_dim, activation=tf.nn.elu)
         layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
-        layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
-        layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
-        layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
+
         g = dense(layer, x_dim, activation=None)  # Outputing xy pairs.
     g_vars = tf.contrib.framework.get_variables(g_vs)
     return g, g_vars

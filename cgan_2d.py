@@ -12,7 +12,7 @@ from matplotlib.gridspec import GridSpec
 import sys
 
 
-tag = 'newlogs'
+tag = 'newlogs2'
 data_num = 10000
 mb_size = 1024  # 128
 z_dim = 10  # 5
