@@ -8,29 +8,31 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import os
 import pdb
-import seaborn as sns
+from scipy.stats import invwishart
 from matplotlib.gridspec import GridSpec
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--tag', type=str, default='test')
-parser.add_argument('--weighted', default=False, action='store_true', dest='weighted',
+parser.add_argument('--unweighted', default=False, action='store_true',
+                    dest='unweighted',
                     help='Chooses whether Vanilla GAN or IW-GAN.')
 parser.add_argument('--do_p', default=False, action='store_true', dest='do_p',
                     help='Choose whether to use P, instead of TP')
 args = parser.parse_args()
 tag = args.tag
-weighted = args.weighted
+unweighted = args.unweighted
+weighted = not unweighted
 do_p = args.do_p
 data_num = 10000
 batch_size = 1024 
 z_dim = 10  # Latent (Age)
-x_dim = 4 
-h_dim = 5 
+x_dim = 50
+h_dim = 10 
 learning_rate = 1e-4
-log_iter = 500
+log_iter = 1000
 log_dir = 'results/iwgan_higher_d_{}'.format(tag)
-max_iter = 100000
+max_iter = 50000
 
 
 def generate_data(n):
@@ -61,23 +63,44 @@ def generate_data(n):
 
     def gen_higher_d():
         v1 = np.random.uniform(0., 6)
-        nine_dim_mean = np.random.normal(v1, 1, size=x_dim - 1)
-        nine_dim_cov = v1 / 6. * np.identity(x_dim - 1)
-        v2 = np.random.multivariate_normal(nine_dim_mean, nine_dim_cov)
+        other_dims_mean = np.random.normal(v1, 1, size=x_dim - 1)
+        other_dims_cov = v1 / 6. * np.identity(x_dim - 1)
+        v2 = np.random.multivariate_normal(other_dims_mean, other_dims_cov)
         out = np.concatenate((
             np.reshape(v1, [1, -1]), np.reshape(v2, [1, -1])), axis=1)
         return out
 
-    sampling_fn = gen_higher_d
+    def gen_hd_mixture_of_gaussians(n):
+        """Samples from mixture of Gaussians w/ Inverse Wishart covariances."""
+        num_mixtures = 5
+        data_raw_unthinned = np.zeros((n, x_dim))
+        for i in range(n):
+            latent = np.random.uniform(0., 6., size=n)
+            centers = np.random.uniform(-1 * latent, latent, size=(num_mixtures, x_dim))
+            chosen_center = centers[np.random.choice(num_mixtures)]
+            data_raw_unthinned[i] = np.random.multivariate_normal(
+                chosen_center, invwishart.rvs(x_dim + 2, np.identity(x_dim)))
 
-    data_raw_unthinned = np.zeros((n, x_dim))
-    data_raw = sampling_fn()
-    for i in range(n):
-        data_raw_unthinned[i] = sampling_fn()
-    while len(data_raw) < n:
-        out = sampling_fn()
-        if np.random.binomial(1, thinning_fn(out[0][0], is_tf=False)):
-            data_raw = np.concatenate((data_raw, out), axis=0)
+        data_raw = []
+        while len(data_raw) < n:
+            latent = np.random.uniform(0., 6)
+            if np.random.binomial(1, thinning_fn(latent, is_tf=False)):
+                valid_sample = True
+                 
+    do_mixture_of_gaussians = 0
+
+    if do_mixture_of_gaussians:
+        data_raw_unthinned, data_raw = gen_hd_mixture_of_gaussians(data_num)
+    else:
+        sampling_fn = gen_higher_d
+        data_raw_unthinned = np.zeros((n, x_dim))
+        for i in range(n):
+            data_raw_unthinned[i] = sampling_fn()
+        data_raw = sampling_fn()
+        while len(data_raw) < n:
+            out = sampling_fn()
+            if np.random.binomial(1, thinning_fn(out[0][0], is_tf=False)):
+                data_raw = np.concatenate((data_raw, out), axis=0)
 
     data_raw_mean = np.mean(data_raw, axis=0)
     data_raw_std = np.std(data_raw, axis=0)
@@ -123,7 +146,7 @@ def sigmoid_cross_entropy_with_logits(logits, labels):
 def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False):
     """Computes mmd between two numpy arrays of same size."""
     if sigma_list is None:
-        sigma_list = [1.0]
+        sigma_list = [0.1, 1.0, 10.0]
 
     n1 = len(arr1)
     n2 = len(arr2)
@@ -406,8 +429,12 @@ for it in range(max_iter):
         mmd_gen_vs_unthinned, _ = compute_mmd(
             generated[np.random.choice(n_sample, 500)],
             data_raw_unthinned[np.random.choice(data_num, 500)])
+        mmd_gen_vs_unthinned_without_label, _ = compute_mmd(
+            generated[:, 1:][np.random.choice(n_sample, 500)],
+            data_raw_unthinned[:, 1:][np.random.choice(data_num, 500)])
 
-        fig = plot(generated, data_raw, data_raw_unthinned, it, mmd_gen_vs_unthinned)
+        fig = plot(generated, data_raw, data_raw_unthinned, it,
+            mmd_gen_vs_unthinned)
 
         # Print diagnostics.
         print("#################")
@@ -415,8 +442,12 @@ for it in range(max_iter):
         print('  d_loss: {:.4}'.format(d_loss_))
         print('  g_loss: {:.4}'.format(g_loss_))
         print('  mmd_gen_vs_unthinned: {:.4}'.format(mmd_gen_vs_unthinned))
-        print(data_raw[np.random.choice(data_num, 5), :])
+        print('  mmd_gen_vs_unthinned_without_label: {:.4}'.format(
+            mmd_gen_vs_unthinned_without_label))
+        print(data_raw[np.random.choice(data_num, 2), :5])
         print
-        print(generated[:5])
+        print(generated[:2, :5])
         with open(os.path.join(log_dir, 'scores.txt'), 'a') as f:
             f.write(str(mmd_gen_vs_unthinned)+'\n')
+        with open(os.path.join(log_dir, 'scores_without_label.txt'), 'a') as f:
+            f.write(str(mmd_gen_vs_unthinned_without_label)+'\n')

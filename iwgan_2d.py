@@ -14,13 +14,15 @@ from matplotlib.gridspec import GridSpec
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--tag', type=str, default='test')
-parser.add_argument('--weighted', default=False, action='store_true', dest='weighted',
+parser.add_argument('--unweighted', default=False, action='store_true',
+                    dest='unweighted',
                     help='Chooses whether Vanilla GAN or IW-GAN.')
 parser.add_argument('--do_p', default=False, action='store_true', dest='do_p',
                     help='Choose whether to use P, instead of TP')
 args = parser.parse_args()
 tag = args.tag
-weighted = args.weighted
+unweighted = args.unweighted
+weighted = not unweighted
 do_p = args.do_p
 data_num = 10000
 batch_size = 1024 
@@ -117,7 +119,7 @@ def sigmoid_cross_entropy_with_logits(logits, labels):
 def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False):
     """Computes mmd between two numpy arrays of same size."""
     if sigma_list is None:
-        sigma_list = [1.0]
+        sigma_list = [0.1, 1.0, 10.0]
 
     n1 = len(arr1)
     n2 = len(arr2)
@@ -399,8 +401,12 @@ for it in range(max_iter):
         mmd_gen_vs_unthinned, _ = compute_mmd(
             generated[np.random.choice(n_sample, 500)],
             data_raw_unthinned[np.random.choice(data_num, 500)])
+        mmd_gen_vs_unthinned_without_label, _ = compute_mmd(
+            generated[:, 1:][np.random.choice(n_sample, 500)],
+            data_raw_unthinned[:, 1:][np.random.choice(data_num, 500)])
 
-        fig = plot(generated, data_raw, data_raw_unthinned, it, mmd_gen_vs_unthinned)
+        fig = plot(generated, data_raw, data_raw_unthinned, it,
+            mmd_gen_vs_unthinned)
 
         # Print diagnostics.
         print("#################")
@@ -408,11 +414,15 @@ for it in range(max_iter):
         print('  d_loss: {:.4}'.format(d_loss_))
         print('  g_loss: {:.4}'.format(g_loss_))
         print('  mmd_gen_vs_unthinned: {:.4}'.format(mmd_gen_vs_unthinned))
+        print('  mmd_gen_vs_unthinned_without_label: {:.4}'.format(
+            mmd_gen_vs_unthinned_without_label))
         print(data_raw[np.random.choice(data_num, 5), :])
         print
         print(generated[:5])
         with open(os.path.join(log_dir, 'scores.txt'), 'a') as f:
             f.write(str(mmd_gen_vs_unthinned)+'\n')
+        with open(os.path.join(log_dir, 'scores_without_label.txt'), 'a') as f:
+            f.write(str(mmd_gen_vs_unthinned_without_label)+'\n')
 
         # Diagnostics for thinning_fn.
         thin_diag = 0
