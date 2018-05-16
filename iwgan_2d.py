@@ -25,15 +25,15 @@ weighted = not unweighted
 do_p = args.do_p
 data_num = 10000
 batch_size = 1024 
-z_dim = 10  # Latent (Age)
-x_dim = 1  # Label (Height)
-y_dim = 1  # Data (Income)
+z_dim = 10  # Generator noise dim.
+x_dim = 2  # Label
 h_dim = 5
 learning_rate = 1e-4
 log_iter = 1000
 log_dir = 'results/iwgan_{}'.format(tag)
 max_iter = 100000
 
+np.random.seed(123)
 
 def generate_data(n):
     def gen_from_filled_circle():
@@ -61,51 +61,102 @@ def generate_data(n):
         out = np.reshape([v1, v2], [1, -1])
         return out
 
-    sampling_fn = gen_from_angled_bar
+    def gen_2d(n):
+        latent_dim = 10
+        #latent_mean = np.zeros(latent_dim)
+        #latent_cov = np.identity(latent_dim)
+        fixed_transform = np.random.normal(0, 1, size=(latent_dim, 2))
+
+        data_raw_unthinned = np.zeros((n, 2))
+        data_raw_unthinned_weights = np.zeros((n, 1))
+        for i in range(n):
+            #rand_latent = np.random.multivariate_normal(latent_mean, latent_cov)
+            rand_latent = np.random.uniform(0, 1, latent_dim)
+            rand_transformed = np.dot(rand_latent, fixed_transform)
+            data_raw_unthinned[i] = rand_transformed
+
+            latent_weight = 1. / thinning_fn(rand_latent[0], is_tf=False)
+            data_raw_unthinned_weights[i] = latent_weight 
+
+        data_raw = np.zeros((n, 2))
+        data_raw_weights = np.zeros((n, 1))
+        count = 0
+        while count < n:
+            #rand_latent = np.random.multivariate_normal(latent_mean, latent_cov)
+            rand_latent = np.random.uniform(0, 1, latent_dim)
+            thinning_value = thinning_fn(rand_latent[0], is_tf=False)
+            to_use = np.random.binomial(1, thinning_value)
+            if to_use:
+                rand_transformed = np.dot(rand_latent, fixed_transform)
+                data_raw[count] = rand_transformed
+
+                latent_weight = 1. / thinning_value
+                data_raw_weights[count] = latent_weight 
+                count += 1
+
+        return data_raw, data_raw_weights, data_raw_unthinned, data_raw_unthinned_weights
+
+
+    (data_raw,
+     data_raw_weights,
+     data_raw_unthinned,
+     data_raw_unthinned_weights) = gen_2d(n)
+
+    #sampling_fn = gen_from_angled_bar
     #sampling_fn = gen_from_horseshoe
 
-    data_raw_unthinned = np.zeros((n, 2))
-    data_raw = sampling_fn()
-    for i in range(n):
-        data_raw_unthinned[i] = sampling_fn()
-    while len(data_raw) < n:
-        out_xyl = sampling_fn()
-        if np.random.binomial(1, thinning_fn(out_xyl[0][0], is_tf=False)):
-            data_raw = np.concatenate((data_raw, out_xyl), axis=0)
+    #data_raw_unthinned = np.zeros((n, 2))
+    #data_raw = sampling_fn()
+    #for i in range(n):
+    #    data_raw_unthinned[i] = sampling_fn()
+    #while len(data_raw) < n:
+    #    out_xyl = sampling_fn()
+    #    if np.random.binomial(1, thinning_fn(out_xyl[0][0], is_tf=False)):
+    #        data_raw = np.concatenate((data_raw, out_xyl), axis=0)
 
     data_raw_mean = np.mean(data_raw, axis=0)
     data_raw_std = np.std(data_raw, axis=0)
     data_normed = (data_raw - data_raw_mean) / data_raw_std 
-    return data_normed, data_raw, data_raw_mean, data_raw_std, data_raw_unthinned
+    return (data_raw, data_raw_weights,
+            data_raw_unthinned, data_raw_unthinned_weights,
+            data_normed, data_raw_mean, data_raw_std)
 
 
 def thinning_fn(inputs, is_tf=True):
     """Thinning on x only (height). Inputs is a vector of x values."""
+    eps = 1e-10
     if is_tf:
-        return 0.99 / (1. + tf.exp(-0.95 * (inputs - 3.))) + 0.01
+        #return 0.99 / (1. + tf.exp(-10. * (inputs - 0.5))) + 0.01
+        return inputs + eps
     else:
-        return 0.99 / (1. + np.exp(-0.95 * (inputs - 3.))) + 0.01
+        #return 0.99 / (1. + np.exp(-10. * (inputs - 0.5))) + 0.01
+        return inputs + eps
 
 
 ###############################################################################
 # Load data.
-data_normed, data_raw, data_raw_mean, data_raw_std, data_raw_unthinned = \
-    generate_data(data_num)
-if do_p:
-    data_normed = to_normed(data_raw_unthinned)
-    data_raw = data_raw_unthinned
+
+(data_raw,
+ data_raw_weights,
+ data_raw_unthinned,
+ data_raw_unthinned_weights,
+ data_normed,
+ data_raw_mean,
+ data_raw_std) = generate_data(data_num)
+#data_normed, data_raw, data_raw_mean, data_raw_std, data_raw_unthinned = \
+#    generate_data(data_num)
+#if do_p:
+#    data_normed = to_normed(data_raw_unthinned)
+#    data_raw = data_raw_unthinned
 ###############################################################################
 
 
-def sample_data(data, batch_size, weighted=weighted):
+def sample_data(data, data_weights, batch_size):
     assert data.shape[1] == 2, 'data shape not 2'
     idxs = np.random.choice(data_num, batch_size)
-    batch_x = np.reshape(data[idxs, 0], [-1, 1])
-    batch_y = np.reshape(data[idxs, 1], [-1, 1])
-    weights = None
-    if weighted:
-        weights = global_weights[idxs]
-    return batch_x, batch_y, weights
+    batch_data = data[idxs]
+    batch_weights = data_weights[idxs]
+    return batch_data, batch_weights
 
 
 def sigmoid_cross_entropy_with_logits(logits, labels):
@@ -188,7 +239,9 @@ def plot(generated, data_raw, data_raw_unthinned, it, mmd_gen_vs_unthinned):
         for j in range(grid_gran):
             grid_x_normed = (grid_x[i] - data_raw_mean[0]) / data_raw_std[0]
             grid_y_normed = (grid_y[j] - data_raw_mean[0]) / data_raw_std[0]
-            vals_on_grid[i][j] = run_discrim(grid_x_normed, grid_y_normed)
+            vals_on_grid[i][j] = run_discrim([grid_x_normed, grid_y_normed])
+            #vals_on_grid[i][j] = sess.run(
+            #    d_real_sample, {x_sample: [grid_x_normed, grid_y_normed]})
 
     fig = plt.figure()
     gs = GridSpec(8, 4)
@@ -201,8 +254,8 @@ def plot(generated, data_raw, data_raw_unthinned, it, mmd_gen_vs_unthinned):
     ax_joint.set_aspect('auto')
     ax_joint.imshow(vals_on_grid, interpolation='nearest', origin='lower', alpha=0.3, aspect='auto',
         extent=[grid_x.min(), grid_x.max(), grid_y.min(), grid_y.max()])
-    ax_thinning = ax_joint.twinx()
-    ax_thinning.plot(grid_x, thinning_fn(grid_x, is_tf=False), color='red', alpha=0.3)
+    #ax_thinning = ax_joint.twinx()
+    #ax_thinning.plot(grid_x, thinning_fn(grid_x, is_tf=False), color='red', alpha=0.3)
     ax_marg_x.hist([raw_v1, gen_v1], bins=30, color=['gray', 'blue'],
         label=['data', 'gen'], alpha=0.3, normed=True)
     ax_marg_y.hist([raw_v2, gen_v2], bins=30, color=['gray', 'blue'],
@@ -238,10 +291,9 @@ def get_sample_z(m, n):
     return np.random.normal(0., 1., size=[m, n])
 
 
-def run_discrim(x_in, y_in):
-    x_in = np.reshape(x_in, [-1, 1])
-    y_in = np.reshape(y_in, [-1, 1])
-    return sess.run(d_real_sample, feed_dict={x_sample: x_in, y_sample: y_in}) 
+def run_discrim(x_in):
+    x_in = np.reshape(x_in, [-1, 2])
+    return sess.run(d_real_sample, feed_dict={x_sample: x_in}) 
 
 
 def to_raw(d, index=None):
@@ -284,29 +336,25 @@ def generator(z, reuse=False):
     with tf.variable_scope('generator', reuse=reuse) as g_vs:
         layer = dense(z, h_dim, activation=tf.nn.elu)
         layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
-        g = dense(layer, x_dim + y_dim, activation=None)  # Outputing xy pairs.
+        g = dense(layer, x_dim, activation=None)  # Outputing xy pairs.
     g_vars = tf.contrib.framework.get_variables(g_vs)
     return g, g_vars
 
 
 # Beginning of graph.
 z = tf.placeholder(tf.float32, shape=[batch_size, z_dim], name='z')
-w = tf.placeholder(tf.float32, shape=[batch_size, 1], name='weights')
 x = tf.placeholder(tf.float32, shape=[batch_size, x_dim], name='x')
-y = tf.placeholder(tf.float32, shape=[batch_size, y_dim], name='y')
-real = tf.concat([x, y], axis=1)
+w = tf.placeholder(tf.float32, shape=[batch_size, 1], name='weights')
 
 g, g_vars = generator(z, reuse=False)
-d_real, d_logit_real, d_vars = discriminator(real, reuse=False)
+d_real, d_logit_real, d_vars = discriminator(x, reuse=False)
 d_fake, d_logit_fake, _ = discriminator(g, reuse=True)
 
 # Separate callable nodes for arbitrarily sized inputs.
 z_sample = tf.placeholder(tf.float32, shape=[None, z_dim], name='z_sample')
 x_sample = tf.placeholder(tf.float32, shape=[None, x_dim], name='x_sample')
-y_sample = tf.placeholder(tf.float32, shape=[None, y_dim], name='y_sample')
-real_sample = tf.concat([x_sample, y_sample], axis=1)
 g_sample, _ = generator(z_sample, reuse=True)
-d_real_sample, _, _ = discriminator(real_sample, reuse=True)
+d_real_sample, _, _ = discriminator(x_sample, reuse=True)
 
 # Define losses.
 errors_real = sigmoid_cross_entropy_with_logits(d_logit_real,
@@ -314,12 +362,12 @@ errors_real = sigmoid_cross_entropy_with_logits(d_logit_real,
 errors_fake = sigmoid_cross_entropy_with_logits(d_logit_fake,
     tf.zeros_like(d_logit_fake))
 if weighted:
-    x_unnormed = x * data_raw_std[0] + data_raw_mean[0]
-    weights_x = 1. / thinning_fn(x_unnormed)
-    weights_x_sum_normalized = weights_x / tf.reduce_sum(weights_x)
-    d_loss_real = tf.reduce_sum(weights_x_sum_normalized * errors_real)
-    #w_normed = w / tf.reduce_sum(w) 
-    #d_loss_real = tf.reduce_sum(w_normed * errors_real)
+    #x_unnormed = x * data_raw_std[0] + data_raw_mean[0]
+    #weights_x = 1. / thinning_fn(x_unnormed)
+    #weights_x_sum_normalized = weights_x / tf.reduce_sum(weights_x)
+    #d_loss_real = tf.reduce_sum(weights_x_sum_normalized * errors_real)
+    w_normed = w / tf.reduce_sum(w) 
+    d_loss_real = tf.reduce_sum(w_normed * errors_real)
 else:
     d_loss_real = tf.reduce_mean(errors_real)
 d_loss_fake = tf.reduce_mean(errors_fake)
@@ -346,11 +394,11 @@ g_optim = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(
 
 
 # Compute global approximation of weights (1/~T(x)).
-global_weights = []
-for v in data_normed:
-    global_weights.append(1. / thinning_fn(to_raw(v)[0], is_tf=False))
-global_weights = np.reshape(np.array(
-    global_weights * data_num / np.sum(global_weights)), [-1, 1])
+#global_weights = []
+#for v in data_normed:
+#    global_weights.append(1. / thinning_fn(to_raw(v)[0], is_tf=False))
+#global_weights = np.reshape(np.array(
+#    global_weights * data_num / np.sum(global_weights)), [-1, 1])
 
 # Start session.
 sess = tf.Session()
@@ -361,21 +409,14 @@ if not os.path.exists(log_dir):
 
 # train()
 for it in range(max_iter):
-    x_batch, y_batch, weights_batch = sample_data(
-        data_normed, batch_size, weighted=weighted)
     z_batch = get_sample_z(batch_size, z_dim)
+    x_batch, w_batch = sample_data(
+        data_normed, data_raw_weights, batch_size)
 
-    if weighted:
-        fetch_dict = {
-            x: x_batch,
-            z: z_batch,
-            y: y_batch,
-            w: weights_batch}
-    else:
-        fetch_dict = {
-            x: x_batch,
-            z: z_batch,
-            y: y_batch}
+    fetch_dict = {
+        z: z_batch,
+        x: x_batch,
+        w: w_batch}
 
     for _ in range(5):
         _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
@@ -394,9 +435,9 @@ for it in range(max_iter):
         mmd_gen_vs_unthinned, _ = compute_mmd(
             generated[np.random.choice(n_sample, 500)],
             data_raw_unthinned[np.random.choice(data_num, 500)])
-        mmd_gen_vs_unthinned_without_label, _ = compute_mmd(
-            generated[:, 1:][np.random.choice(n_sample, 500)],
-            data_raw_unthinned[:, 1:][np.random.choice(data_num, 500)])
+        #mmd_gen_vs_unthinned_without_label, _ = compute_mmd(
+        #    generated[:, 1:][np.random.choice(n_sample, 500)],
+        #    data_raw_unthinned[:, 1:][np.random.choice(data_num, 500)])
 
         fig = plot(generated, data_raw, data_raw_unthinned, it,
             mmd_gen_vs_unthinned)
@@ -407,15 +448,15 @@ for it in range(max_iter):
         print('  d_loss: {:.4}'.format(d_loss_))
         print('  g_loss: {:.4}'.format(g_loss_))
         print('  mmd_gen_vs_unthinned: {:.4}'.format(mmd_gen_vs_unthinned))
-        print('  mmd_gen_vs_unthinned_without_label: {:.4}'.format(
-            mmd_gen_vs_unthinned_without_label))
+        #print('  mmd_gen_vs_unthinned_without_label: {:.4}'.format(
+        #    mmd_gen_vs_unthinned_without_label))
         print(data_raw[np.random.choice(data_num, 5), :])
         print
         print(generated[:5])
         with open(os.path.join(log_dir, 'scores.txt'), 'a') as f:
             f.write(str(mmd_gen_vs_unthinned)+'\n')
-        with open(os.path.join(log_dir, 'scores_without_label.txt'), 'a') as f:
-            f.write(str(mmd_gen_vs_unthinned_without_label)+'\n')
+        #with open(os.path.join(log_dir, 'scores_without_label.txt'), 'a') as f:
+        #    f.write(str(mmd_gen_vs_unthinned_without_label)+'\n')
 
         # Diagnostics for thinning_fn.
         thin_diag = 0
