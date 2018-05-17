@@ -31,7 +31,7 @@ latent_dim = 5
 
 batch_size = 1024 
 noise_dim = 10
-h_dim = 5
+h_dim = 10
 learning_rate = 1e-4
 log_iter = 1000
 log_dir = 'results/iwgan_{}'.format(tag)
@@ -87,7 +87,8 @@ def plot(generated, data_raw, data_raw_unthinned, it, mmd_gen_vs_unthinned):
     ax_joint.scatter(raw_v1, raw_v2, c='gray', alpha=0.1)
     ax_joint.scatter(gen_v1, gen_v2, alpha=0.3)
     ax_joint.set_aspect('auto')
-    ax_joint.imshow(vals_on_grid, interpolation='nearest', origin='lower', alpha=0.3, aspect='auto',
+    ax_joint.imshow(vals_on_grid, interpolation='nearest', origin='lower',
+        alpha=0.3, aspect='auto',
         extent=[grid_x.min(), grid_x.max(), grid_y.min(), grid_y.max()])
 
     ax_marg_x.hist([raw_v1, gen_v1], bins=30, color=['gray', 'blue'],
@@ -116,7 +117,8 @@ def plot(generated, data_raw, data_raw_unthinned, it, mmd_gen_vs_unthinned):
     plt.setp(ax_raw_marg_y.get_yticklabels(), visible=False)
     ########
 
-    plt.suptitle('iwgan. it: {}, mmd_gen_vs_unthinned: {}'.format(it, mmd_gen_vs_unthinned))
+    plt.suptitle('iwgan. it: {}, mmd_gen_vs_unthinned: {}'.format(
+        it, mmd_gen_vs_unthinned))
 
     plt.savefig('{}/{}.png'.format(log_dir, it))
     plt.close()
@@ -127,7 +129,7 @@ def get_sample_z(m, n):
 
 
 def run_discrim(x_in):
-    x_in = np.reshape(x_in, [-1, 2])
+    x_in = np.reshape(x_in, [-1, data_dim])
     return sess.run(d_real_sample, feed_dict={x_sample: x_in}) 
 
 
@@ -262,6 +264,9 @@ for it in range(max_iter):
         if data_dim == 2:
             fig = plot(generated, data_raw, data_raw_unthinned, it,
                 mmd_gen_vs_unthinned)
+
+        if np.isnan(d_loss_):
+            sys.exit('got nan')
 
         # Print diagnostics.
         print("#################")
