@@ -10,17 +10,66 @@ import os
 import pdb
 
 
+def one_time_data_setup():
+
+    if not os.path.exists('data'):
+        os.makedirs('data')
+
+    def make_files(n, data_dim, latent_dim, with_latents, m_weight):
+        (data_raw, data_raw_weights,
+         data_raw_unthinned, data_raw_unthinned_weights,
+         data_normed, data_raw_mean, data_raw_std) = generate_data(
+                 n, data_dim, latent_dim, with_latents=with_latents, m_weight=m_weight)
+        np.save('data/{}d_data_raw.npy'.format(data_dim), data_raw[:, -data_dim:])  # Removing latents.
+        np.save('data/{}d_data_raw_weights.npy'.format(data_dim), data_raw_weights)
+        np.save('data/{}d_data_raw_unthinned.npy'.format(data_dim), data_raw_unthinned[:, -data_dim:])  # Removing latents.
+        np.save('data/{}d_data_raw_unthinned_weights.npy'.format(data_dim), data_raw_unthinned_weights)
+        np.save('data/{}d_data_normed.npy'.format(data_dim), data_normed[:, -data_dim:])  # Removing latents.
+        np.save('data/{}d_data_raw_mean.npy'.format(data_dim), data_raw_mean[-data_dim:])  # Removing latents.
+        np.save('data/{}d_data_raw_std.npy'.format(data_dim), data_raw_std[-data_dim:])  # Removing latents.
+
+        np.save('data/with_latents_{}d_data_raw.npy'.format(data_dim), data_raw)
+        np.save('data/with_latents_{}d_data_raw_weights.npy'.format(data_dim), data_raw_weights)
+        np.save('data/with_latents_{}d_data_raw_unthinned.npy'.format(data_dim), data_raw_unthinned)
+        np.save('data/with_latents_{}d_data_raw_unthinned_weights.npy'.format(data_dim), data_raw_unthinned_weights)
+        np.save('data/with_latents_{}d_data_normed.npy'.format(data_dim), data_normed)
+        np.save('data/with_latents_{}d_data_raw_mean.npy'.format(data_dim), data_raw_mean)
+        np.save('data/with_latents_{}d_data_raw_std.npy'.format(data_dim), data_raw_std)
+
+    n = 10000
+    latent_dim = 10
+    with_latents = True
+    m_weight = 5.  # NOTE: THIS MUST AGREE WITH THE THINNING_FN DEFINITION!
+    make_files(n, 2, latent_dim, with_latents, m_weight)
+    make_files(n, 4, latent_dim, with_latents, m_weight)
+    make_files(n, 10, latent_dim, with_latents, m_weight)
+
+
+def get_data(data_dim, with_latents=False):
+    if with_latents:
+        prepended = 'with_latents_{}d'.format(data_dim)
+    else:
+        prepended = '{}d'.format(data_dim)
+    data_raw = np.load('data/{}_data_raw.npy'.format(prepended))
+    data_raw_weights = np.load('data/{}_data_raw_weights.npy'.format(prepended))
+    data_raw_unthinned = np.load('data/{}_data_raw_unthinned.npy'.format(prepended))
+    data_raw_unthinned_weights = np.load('data/{}_data_raw_unthinned_weights.npy'.format(prepended))
+    data_normed = np.load('data/{}_data_normed.npy'.format(prepended))
+    data_raw_mean = np.load('data/{}_data_raw_mean.npy'.format(prepended))
+    data_raw_std = np.load('data/{}_data_raw_std.npy'.format(prepended))
+    return (data_raw, data_raw_weights,
+            data_raw_unthinned, data_raw_unthinned_weights,
+            data_normed, data_raw_mean, data_raw_std)
+
+
 def generate_data(n, data_dim, latent_dim, with_latents=False, m_weight=1):
     def gen_2d(n):
-        #latent_mean = np.zeros(latent_dim)
-        #latent_cov = np.identity(latent_dim)
         fixed_transform = np.random.normal(0, 1, size=(latent_dim, data_dim))
 
         data_raw_unthinned = np.zeros((n, data_dim))
         data_raw_unthinned_latents = np.zeros((n, latent_dim))
         data_raw_unthinned_weights = np.zeros((n, 1))
         for i in range(n):
-            #rand_latent = np.random.multivariate_normal(latent_mean, latent_cov)
             rand_latent = np.random.uniform(0, 1, latent_dim)
             rand_transformed = np.dot(rand_latent, fixed_transform)
             data_raw_unthinned[i] = rand_transformed
@@ -34,7 +83,6 @@ def generate_data(n, data_dim, latent_dim, with_latents=False, m_weight=1):
         data_raw_weights = np.zeros((n, 1))
         count = 0
         while count < n:
-            #rand_latent = np.random.multivariate_normal(latent_mean, latent_cov)
             rand_latent = np.random.uniform(0, 1, latent_dim)
             thinning_value = thinning_fn(rand_latent, is_tf=False, m_weight=1.)  # Strictly T, not M.
             to_use = np.random.binomial(1, thinning_value)
@@ -43,7 +91,7 @@ def generate_data(n, data_dim, latent_dim, with_latents=False, m_weight=1):
                 data_raw[count] = rand_transformed
                 data_raw_latents[count] = rand_latent
 
-                latent_weight = 1. / (m_weight * thinning_value)  # But weight needs m_weight.
+                latent_weight = thinning_fn(rand_latent, is_tf=False, m_weight=m_weight)
                 data_raw_weights[count] = latent_weight
                 count += 1
 
@@ -62,6 +110,7 @@ def generate_data(n, data_dim, latent_dim, with_latents=False, m_weight=1):
     data_raw_mean = np.mean(data_raw, axis=0)
     data_raw_std = np.std(data_raw, axis=0)
     data_normed = (data_raw - data_raw_mean) / data_raw_std
+
     return (data_raw, data_raw_weights,
             data_raw_unthinned, data_raw_unthinned_weights,
             data_normed, data_raw_mean, data_raw_std)
@@ -71,9 +120,9 @@ def thinning_fn(inputs, is_tf=True, m_weight=1):
     """Thinning on zero'th index of input."""
     eps = 1e-10
     if is_tf:
-        return m_weight * inputs[0] + eps
+        return m_weight * inputs[0] ** 4 + eps
     else:
-        return m_weight * inputs[0] + eps
+        return m_weight * inputs[0] ** 4 + eps
 
 
 def sample_data(data, data_weights, batch_size):
@@ -137,6 +186,3 @@ def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False):
                np.sum(K_yy_upper) / num_combos_y -
                2 * np.sum(K_xy) / (n1 * n2))
         return mmd, exp_object
-
-
-

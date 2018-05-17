@@ -9,7 +9,7 @@ import sys
 import tensorflow as tf
 layers = tf.layers
 
-from utils import get_data, generate_data, sample_data, compute_mmd
+from utils import get_data, generate_data, thinning_fn, sample_data, compute_mmd
 from matplotlib.gridspec import GridSpec
 from tensorflow.examples.tutorials.mnist import input_data
 
@@ -19,13 +19,11 @@ parser.add_argument('--tag', type=str, default='test')
 parser.add_argument('--do_p', default=False, action='store_true', dest='do_p',
     help='Choose whether to use P, instead of TP')
 parser.add_argument('--data_dim', type=int, default=2)
-parser.add_argument('--estimator', type=str, default='sn', choices=['sn', 'iw'])
 
 args = parser.parse_args()
 tag = args.tag
 do_p = args.do_p
 data_dim = args.data_dim
-estimator = args.estimator
 
 data_num = 10000
 latent_dim = 10
@@ -38,8 +36,6 @@ log_iter = 1000
 log_dir = 'results/iwgan_{}'.format(tag)
 max_iter = 100000
 
-np.random.seed(123)
-
 
 # Load data.
 #(data_raw,
@@ -49,7 +45,7 @@ np.random.seed(123)
 # data_normed,
 # data_raw_mean,
 # data_raw_std) = generate_data(
-#     data_num, data_dim, latent_dim, with_latents=False, m_weight=2.)  # m_weight since changed to 5.
+#     data_num, data_dim, latent_dim, with_latents=False, m_weight=2.)
 (data_raw,
  data_raw_weights,
  data_raw_unthinned,
@@ -187,6 +183,11 @@ def generator(z, reuse=False):
     return g, g_vars
 
 
+def tf_median(v):
+    m = v.get_shape()[0]//2
+    return tf.nn.top_k(v, m).values[m-1]
+
+
 # Beginning of graph.
 z = tf.placeholder(tf.float32, shape=[batch_size, noise_dim], name='z')
 x = tf.placeholder(tf.float32, shape=[batch_size, data_dim], name='x')
@@ -203,17 +204,21 @@ g_sample, _ = generator(z_sample, reuse=True)
 d_real_sample, _, _ = discriminator(x_sample, reuse=True)
 
 # Define losses.
-errors_real = sigmoid_cross_entropy_with_logits(d_logit_real,
-    tf.ones_like(d_logit_real))
-errors_fake = sigmoid_cross_entropy_with_logits(d_logit_fake,
-    tf.zeros_like(d_logit_fake))
+errors_real = sigmoid_cross_entropy_with_logits(
+    d_logit_real, tf.ones_like(d_logit_real))
+errors_fake = sigmoid_cross_entropy_with_logits(
+    d_logit_fake, tf.zeros_like(d_logit_fake))
 
-# Weighted loss on real data.
-if estimator == 'sn':
-    w_normed = w / tf.reduce_sum(w) 
-    d_loss_real = tf.reduce_sum(w_normed * errors_real)
-elif estimator == 'iw':
-    d_loss_real = tf.reduce_mean(w * errors_real)
+# Median of means, weighted loss on real data.
+weighted_errors_real = w * errors_real
+wer1, wer2, wer3, wer4 = tf.split(weighted_errors_real, 4)
+d_loss_real_1 = tf.reduce_mean(wer1)
+d_loss_real_2 = tf.reduce_mean(wer2)
+d_loss_real_3 = tf.reduce_mean(wer3)
+d_loss_real_4 = tf.reduce_mean(wer4)
+median_of_d_loss_real_splits = tf_median(tf.stack(
+    [d_loss_real_1, d_loss_real_1, d_loss_real_1, d_loss_real_1], axis=0))
+d_loss_real = median_of_d_loss_real_splits
 
 # Regular loss on fake data.
 d_loss_fake = tf.reduce_mean(errors_fake)

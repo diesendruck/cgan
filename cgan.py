@@ -11,7 +11,7 @@ import tensorflow as tf
 layers = tf.layers
 
 from tensorflow.examples.tutorials.mnist import input_data
-from utils import generate_data, thinning_fn, sample_data, compute_mmd 
+from utils import get_data, generate_data, thinning_fn, sample_data, compute_mmd 
 
 
 parser = argparse.ArgumentParser()
@@ -35,13 +35,20 @@ max_iter = 100000
 
 
 # Load data.
+#(data_raw,
+# data_raw_weights,
+# data_raw_unthinned,
+# data_raw_unthinned_weights,
+# data_normed,
+# data_raw_mean,
+# data_raw_std) = generate_data(data_num, data_dim, latent_dim, with_latents=True)
 (data_raw,
  data_raw_weights,
  data_raw_unthinned,
  data_raw_unthinned_weights,
  data_normed,
  data_raw_mean,
- data_raw_std) = generate_data(data_num, data_dim, latent_dim, with_latents=True)
+ data_raw_std) = get_data(data_dim, with_latents=True)
 
 
 def sigmoid_cross_entropy_with_logits(logits, labels):
