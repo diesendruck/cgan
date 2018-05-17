@@ -15,21 +15,21 @@ from tensorflow.examples.tutorials.mnist import input_data
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--tag', type=str, default='test')
-parser.add_argument('--unweighted', default=False, action='store_true',
-    dest='unweighted', help='Chooses whether Vanilla GAN or IW-GAN.')
 parser.add_argument('--do_p', default=False, action='store_true', dest='do_p',
     help='Choose whether to use P, instead of TP')
+parser.add_argument('--data_dim', type=int, default=2)
+parser.add_argument('--estimator', type=str, default='sn', choices=['sn', 'iw'])
+
 args = parser.parse_args()
 tag = args.tag
-unweighted = args.unweighted
-weighted = not unweighted
 do_p = args.do_p
+data_dim = args.data_dim
+estimator = args.estimator
 
 data_num = 10000
-data_dim = 2
-latent_dim = 5
+latent_dim = 10
 
-batch_size = 1024 
+batch_size = 64 
 noise_dim = 10
 h_dim = 10
 learning_rate = 1e-4
@@ -117,7 +117,7 @@ def plot(generated, data_raw, data_raw_unthinned, it, mmd_gen_vs_unthinned):
     plt.setp(ax_raw_marg_y.get_yticklabels(), visible=False)
     ########
 
-    plt.suptitle('iwgan. it: {}, mmd_gen_vs_unthinned: {}'.format(
+    plt.suptitle('iwgan. it: {}, mmd_gen_vs_unthinned: {:.4f}'.format(
         it, mmd_gen_vs_unthinned))
 
     plt.savefig('{}/{}.png'.format(log_dir, it))
@@ -198,11 +198,15 @@ errors_real = sigmoid_cross_entropy_with_logits(d_logit_real,
     tf.ones_like(d_logit_real))
 errors_fake = sigmoid_cross_entropy_with_logits(d_logit_fake,
     tf.zeros_like(d_logit_fake))
-if weighted:
+
+# Weighted loss on real data.
+if estimator == 'sn':
     w_normed = w / tf.reduce_sum(w) 
     d_loss_real = tf.reduce_sum(w_normed * errors_real)
-else:
-    d_loss_real = tf.reduce_mean(errors_real)
+elif estimator == 'iw':
+    d_loss_real = tf.reduce_mean(w * errors_real)
+
+# Regular loss on fake data.
 d_loss_fake = tf.reduce_mean(errors_fake)
 
 d_loss = d_loss_real + d_loss_fake

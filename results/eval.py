@@ -15,11 +15,12 @@ elif not os.path.exists(log_dir):
 scores_all = np.loadtxt(os.path.join(log_dir, 'scores.txt'))
 scores_not_nan = scores_all[~np.isnan(scores_all)]
 scores = scores_not_nan[-10:]
-print('With label. Mean: {:.4f}, Stderr: {:.4f}'.format(np.mean(scores), np.std(scores)))
+print(scores_all)
+print('Mean: {:.4f}, Stderr: {:.4f}'.format(np.mean(scores), np.std(scores)))
 
-scores_wl_all = np.loadtxt(os.path.join(log_dir, 'scores_without_label.txt'))
-scores_wl_not_nan = scores_wl_all[~np.isnan(scores_wl_all)]
-scores_wl = scores_wl_not_nan[-10:]
-print('Without label. Mean: {:.4f}, Stderr: {:.4f}'.format(
-    np.mean(scores_wl), np.std(scores_wl)))
+#scores_wl_all = np.loadtxt(os.path.join(log_dir, 'scores_without_label.txt'))
+#scores_wl_not_nan = scores_wl_all[~np.isnan(scores_wl_all)]
+#scores_wl = scores_wl_not_nan[-10:]
+#print('Without label. Mean: {:.4f}, Stderr: {:.4f}'.format(
+#    np.mean(scores_wl), np.std(scores_wl)))
 pdb.set_trace()

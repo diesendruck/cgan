@@ -16,14 +16,15 @@ from utils import generate_data, thinning_fn, sample_data, compute_mmd
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--tag', type=str, default='test')
+parser.add_argument('--data_dim', type=int, default=2)
 args = parser.parse_args()
 tag = args.tag
+data_dim = args.data_dim
 
 data_num = 10000
-data_dim = 2
-latent_dim = 5
+latent_dim = 10
 
-batch_size = 1024
+batch_size = 64
 noise_dim = 10
 h_dim = 10
 learning_rate = 1e-4
