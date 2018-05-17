@@ -23,6 +23,7 @@ data_dim = args.data_dim
 
 data_num = 10000
 latent_dim = 10
+label_dim = 1
 
 batch_size = 64
 noise_dim = 10
@@ -124,8 +125,8 @@ def dense(x, width, activation, batch_residual=False):
         return layers.batch_normalization(x_) + x
 
 
-def discriminator(latent, x, reuse=False):
-    inputs = tf.concat(axis=1, values=[latent, x])
+def discriminator(label, x, reuse=False):
+    inputs = tf.concat(axis=1, values=[label, x])
     with tf.variable_scope('discriminator', reuse=reuse) as d_vs:
         layer = dense(inputs, h_dim, activation=tf.nn.elu)
         layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
@@ -135,8 +136,8 @@ def discriminator(latent, x, reuse=False):
     return d_prob, d_logit, d_vars 
 
 
-def generator(z, latent, reuse=False):
-    inputs = tf.concat(axis=1, values=[z, latent])
+def generator(z, label, reuse=False):
+    inputs = tf.concat(axis=1, values=[z, label])
     with tf.variable_scope('generator', reuse=reuse) as g_vs:
         layer = dense(inputs, h_dim, activation=tf.nn.elu)
         layer = dense(layer, h_dim, activation=tf.nn.elu, batch_residual=True)
@@ -148,7 +149,7 @@ def generator(z, latent, reuse=False):
 def run_discrim(x_in, y_in):
     x_in = np.reshape(x_in, [-1, 1])
     y_in = np.reshape(y_in, [-1, 1])
-    return sess.run(d_real, feed_dict={x: x_in, latent: y_in}) 
+    return sess.run(d_real, feed_dict={x: x_in, label: y_in}) 
 
 
 def get_sample_z(m, n):
@@ -158,11 +159,11 @@ def get_sample_z(m, n):
 # Beginning of graph.
 z = tf.placeholder(tf.float32, shape=[None, noise_dim], name='z')
 x = tf.placeholder(tf.float32, shape=[None, data_dim], name='x')
-latent = tf.placeholder(tf.float32, shape=[None, latent_dim], name='latent')
+label = tf.placeholder(tf.float32, shape=[None, label_dim], name='label')
 
-g, g_vars = generator(z, latent, reuse=False)  # Takes in noise and label.
-d_real, d_logit_real, d_vars = discriminator(latent, x, reuse=False)  # Takes in label and data.
-d_fake, d_logit_fake, _ = discriminator(latent, g, reuse=True)  # Takes in label and data.
+g, g_vars = generator(z, label, reuse=False)  # Takes in noise and label.
+d_real, d_logit_real, d_vars = discriminator(label, x, reuse=False)  # Takes in label and data.
+d_fake, d_logit_fake, _ = discriminator(label, g, reuse=True)  # Takes in label and data.
 
 errors_real = sigmoid_cross_entropy_with_logits(d_logit_real,
     tf.ones_like(d_logit_real))
@@ -205,6 +206,7 @@ if not os.path.exists(log_dir):
 for it in range(max_iter):
     d_batch, w_batch = sample_data(data_normed, data_raw_weights, batch_size)
     latent_batch, x_batch = d_batch[:, :latent_dim], d_batch[:, -data_dim:]
+    label_batch = latent_batch[:, :label_dim]
 
     z_batch = get_sample_z(batch_size, noise_dim)
 
@@ -214,27 +216,32 @@ for it in range(max_iter):
             feed_dict={
                 z: z_batch,
                 x: x_batch,
-                latent: latent_batch})
+                label: label_batch})
     for _ in range(1):
         _, d_logit_real_, d_logit_fake_, d_loss_, g_loss_ = sess.run(
                 [g_optim, d_logit_real, d_logit_fake, d_loss, g_loss],
             feed_dict={
                 z: z_batch,
                 x: x_batch,
-                latent: latent_batch})
+                label: label_batch})
 
     if it % log_iter == 0:
         n_sample = 10000
         z_sample = get_sample_z(n_sample, noise_dim)
 
+        ####################################################
         # SAMPLE FROM CONDITIONAL, REGULATED BY THINNING_FN.
+        # Get only latent columns.
         raw_marginal = data_raw[:, :latent_dim]
-        #thinning_fn_values = thinning_fn(raw_marginal, is_tf=False)
+
+        # Get weights based on thinning_fn (which only weights on first dimension).
         thinning_fn_values = np.zeros((data_num, 1))
         for i in range(data_num):
             thinning_fn_values[i] = thinning_fn(raw_marginal[i], is_tf=False)
         weights = 1. / thinning_fn_values
         weights_sum_normalized = weights / np.sum(weights)
+
+        # Sample from latents with reweighted probabilities.
         sample_indices = np.random.choice(data_num, size=n_sample,
             p=weights_sum_normalized.flatten())
         latent_sample_unnormed = raw_marginal[sample_indices]
@@ -242,9 +249,14 @@ for it in range(max_iter):
             (latent_sample_unnormed - data_raw_mean[:latent_dim]) / 
              data_raw_std[:latent_dim])
 
-        g_out = sess.run(g, feed_dict={z: z_sample, latent: latent_sample})
+        # Get only the label dimension, to pass to Generator.
+        label_sample =  latent_sample[:, :label_dim]
+
+        # Conditionally generate new sample.
+        g_out = sess.run(g, feed_dict={z: z_sample, label: label_sample})
         generated_normed = np.hstack((latent_sample, g_out))
         generated = np.array(generated_normed) * data_raw_std + data_raw_mean
+        ####################################################
 
         # Compute MMD only between data dimensions, and not latent ones.
         mmd_gen_vs_unthinned, _ = compute_mmd(

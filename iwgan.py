@@ -47,7 +47,8 @@ np.random.seed(123)
  data_raw_unthinned_weights,
  data_normed,
  data_raw_mean,
- data_raw_std) = generate_data(data_num, data_dim, latent_dim, with_latents=False)
+ data_raw_std) = generate_data(
+     data_num, data_dim, latent_dim, with_latents=False, m_weight=2.)
 
 
 def sigmoid_cross_entropy_with_logits(logits, labels):

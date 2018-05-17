@@ -10,7 +10,7 @@ import os
 import pdb
 
 
-def generate_data(n, data_dim, latent_dim, with_latents=False):
+def generate_data(n, data_dim, latent_dim, with_latents=False, m_weight=1):
     def gen_2d(n):
         #latent_mean = np.zeros(latent_dim)
         #latent_cov = np.identity(latent_dim)
@@ -26,7 +26,7 @@ def generate_data(n, data_dim, latent_dim, with_latents=False):
             data_raw_unthinned[i] = rand_transformed
             data_raw_unthinned_latents[i] = rand_latent
 
-            latent_weight = 1. / thinning_fn(rand_latent, is_tf=False)
+            latent_weight = 1. / thinning_fn(rand_latent, is_tf=False, m_weight=m_weight)
             data_raw_unthinned_weights[i] = latent_weight
 
         data_raw = np.zeros((n, data_dim))
@@ -36,14 +36,14 @@ def generate_data(n, data_dim, latent_dim, with_latents=False):
         while count < n:
             #rand_latent = np.random.multivariate_normal(latent_mean, latent_cov)
             rand_latent = np.random.uniform(0, 1, latent_dim)
-            thinning_value = thinning_fn(rand_latent, is_tf=False)
+            thinning_value = thinning_fn(rand_latent, is_tf=False, m_weight=1.)  # Strictly T, not M.
             to_use = np.random.binomial(1, thinning_value)
             if to_use:
                 rand_transformed = np.dot(rand_latent, fixed_transform)
                 data_raw[count] = rand_transformed
                 data_raw_latents[count] = rand_latent
 
-                latent_weight = 1. / thinning_value
+                latent_weight = 1. / (m_weight * thinning_value)  # But weight needs m_weight.
                 data_raw_weights[count] = latent_weight
                 count += 1
 
@@ -67,13 +67,13 @@ def generate_data(n, data_dim, latent_dim, with_latents=False):
             data_normed, data_raw_mean, data_raw_std)
 
 
-def thinning_fn(inputs, is_tf=True):
+def thinning_fn(inputs, is_tf=True, m_weight=1):
     """Thinning on zero'th index of input."""
     eps = 1e-10
     if is_tf:
-        return inputs[0] + eps
+        return m_weight * inputs[0] + eps
     else:
-        return inputs[0] + eps
+        return m_weight * inputs[0] + eps
 
 
 def sample_data(data, data_weights, batch_size):
