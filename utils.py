@@ -10,9 +10,8 @@ import os
 import pdb
 
 
-def generate_data(n, data_dim, with_latents=False):
+def generate_data(n, data_dim, latent_dim, with_latents=False):
     def gen_2d(n):
-        latent_dim = 5
         #latent_mean = np.zeros(latent_dim)
         #latent_cov = np.identity(latent_dim)
         fixed_transform = np.random.normal(0, 1, size=(latent_dim, data_dim))
@@ -69,12 +68,12 @@ def generate_data(n, data_dim, with_latents=False):
 
 
 def thinning_fn(inputs, is_tf=True):
-    """Thinning on x only (height). Inputs is a vector of x values."""
+    """Thinning on zero'th index of input."""
     eps = 1e-10
     if is_tf:
-        return inputs[0] ** 2 + eps
+        return inputs[0] + eps
     else:
-        return inputs[0] ** 2 + eps
+        return inputs[0] + eps
 
 
 def sample_data(data, data_weights, batch_size):
