@@ -14,11 +14,13 @@ parser.add_argument('--data_set', type=int, default=1, choices=[1, 2, 3])
 parser.add_argument('--data_mode', type=str, default='latent', choices=['latent', 'transformed'])
 parser.add_argument('--alpha', type=float, default=0.001)
 parser.add_argument('--batch_size', type=int, default=64)
+parser.add_argument('--email', type=int, default=0)
 args = parser.parse_args()
 data_set = args.data_set
 data_mode = args.data_mode
 alpha = args.alpha
 batch_size = args.batch_size
+email = args.email
 
 
 def compute_mmd_miw_numpy(arr1, arr2, arr1_weights):
@@ -191,6 +193,7 @@ plt.close()
 iw = mmd_iw
 miw = mmd_miw
 print('Max IW: {}, Max MIW: {}'.format(max(np.abs(iw)), max(np.abs(miw))))
-os.system('echo $PWD | mutt momod@utexas.edu -s "test_estimator"  -a "{}"'.format(file_name))
+if email:
+    os.system('echo $PWD | mutt momod@utexas.edu -s "test_estimator"  -a "{}"'.format(file_name))
 
 
