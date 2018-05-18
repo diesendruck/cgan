@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pdb
+import sys
 import tensorflow as tf
 layers = tf.layers
 
@@ -182,8 +183,8 @@ def tf_median(v):
     return tf.nn.top_k(v, m).values[m-1]
 
 
-def compute_mmd_weighted_median_of_means(input1, input2, input1_weights):
-    """Wrapper on compute_mmd_weighted, to compute median of means.i
+def compute_mmd_iw_median_of_means(input1, input2, input1_weights):
+    """Wrapper on compute_mmd_iw, to compute median of means.i
     
     Split input into groups, compute MMD on each, and do backprop on the median
     of those MMDs.
@@ -192,16 +193,16 @@ def compute_mmd_weighted_median_of_means(input1, input2, input1_weights):
     k1_in2, k2_in2, k3_in2, k4_in2 = tf.split(input2, 4)
     k1_in1_w, k2_in1_w, k3_in1_w, k4_in1_w = tf.split(input1_weights, 4)
     
-    mmd1 = compute_mmd_weighted(k1_in1, k1_in2, k1_in1_w)
-    mmd2 = compute_mmd_weighted(k2_in1, k2_in2, k2_in1_w)
-    mmd3 = compute_mmd_weighted(k3_in1, k3_in2, k3_in1_w)
-    mmd4 = compute_mmd_weighted(k4_in1, k4_in2, k4_in1_w)
+    mmd1 = compute_mmd_iw(k1_in1, k1_in2, k1_in1_w)
+    mmd2 = compute_mmd_iw(k2_in1, k2_in2, k2_in1_w)
+    mmd3 = compute_mmd_iw(k3_in1, k3_in2, k3_in1_w)
+    mmd4 = compute_mmd_iw(k4_in1, k4_in2, k4_in1_w)
 
     median_of_mmds = tf_median(tf.stack([mmd1, mmd2, mmd3, mmd4], axis=0))
     return median_of_mmds
 
 
-def compute_mmd_weighted(in1, in2, in1_weights):
+def compute_mmd_iw(in1, in2, in1_weights):
     """Computes MMD between two batches of d-dimensional inputs.
     
     In this setting, in1 is real and in2 is generated, so in1 
@@ -274,7 +275,7 @@ d_real, d_logit_real, d_vars = discriminator(x, reuse=False)
 d_fake, d_logit_fake, _ = discriminator(g, reuse=True)
 
 # Define losses.
-mmd = compute_mmd_weighted_median_of_means(x, g, x_weights)
+mmd = compute_mmd_iw_median_of_means(x, g, x_weights)
 g_loss = mmd
 
 g_optim = tf.train.RMSPropOptimizer(learning_rate=lr).minimize(

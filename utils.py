@@ -1,13 +1,15 @@
 import argparse
 import tensorflow as tf
 layers = tf.layers
-from tensorflow.examples.tutorials.mnist import input_data
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import os
 import pdb
+
+from scipy.stats import beta
+from tensorflow.examples.tutorials.mnist import input_data
 
 
 def one_time_data_setup():
@@ -62,7 +64,7 @@ def get_data(data_dim, with_latents=False):
             data_normed, data_raw_mean, data_raw_std)
 
 
-def generate_data(n, data_dim, latent_dim, with_latents=False, m_weight=1):
+def generate_data(data_num, data_dim, latent_dim, with_latents=False, m_weight=1):
     def gen_2d(n):
         fixed_transform = np.random.normal(0, 1, size=(latent_dim, data_dim))
 
@@ -102,10 +104,36 @@ def generate_data(n, data_dim, latent_dim, with_latents=False, m_weight=1):
 
         return data_raw, data_raw_weights, data_raw_unthinned, data_raw_unthinned_weights
 
+    def gen_beta_2d(data_num):
+        alpha = 0.001
+        beta_params = [1] * latent_dim
+        beta_params[0] = alpha
+
+        latent = np.random.uniform(0, 1, size=(data_num, latent_dim))
+        latent_unthinned = np.random.beta(beta_params, beta_params, (data_num, latent_dim))
+        weights = vert(beta.pdf(latent[:, 0], alpha, 1.))
+        weights_unthinned = vert(beta.pdf(latent_unthinned[:, 0], alpha, 1.))
+
+        fixed_transform = np.random.normal(0, 1, size=(latent_dim, data_dim))
+        data = np.dot(latent, fixed_transform)
+        data_unthinned = np.dot(latent_unthinned, fixed_transform)
+
+        if with_latents:
+            data = np.concatenate((latent, data), axis=1)
+            data_unthinned = np.concatenate(
+                (latent_unthinned, data_unthinned), axis=1)
+
+        return data, weights, data_unthinned, weights_unthinned 
+
+    #(data_raw,
+    # data_raw_weights,
+    # data_raw_unthinned,
+    # data_raw_unthinned_weights) = gen_2d(n)
     (data_raw,
      data_raw_weights,
      data_raw_unthinned,
-     data_raw_unthinned_weights) = gen_2d(n)
+     data_raw_unthinned_weights) = gen_beta_2d(data_num)
+
 
     data_raw_mean = np.mean(data_raw, axis=0)
     data_raw_std = np.std(data_raw, axis=0)
@@ -123,6 +151,10 @@ def thinning_fn(inputs, is_tf=True, m_weight=1):
         return m_weight * inputs[0] ** 4 + eps
     else:
         return m_weight * inputs[0] ** 4 + eps
+
+
+def vert(arr):
+    return np.reshape(arr, [-1, 1])
 
 
 def sample_data(data, data_weights, batch_size):
@@ -186,3 +218,8 @@ def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False):
                np.sum(K_yy_upper) / num_combos_y -
                2 * np.sum(K_xy) / (n1 * n2))
         return mmd, exp_object
+
+
+# NOTE: The following must be commented out after data generation, before 
+#   training any models.
+#one_time_data_setup()
