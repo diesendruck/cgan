@@ -74,6 +74,7 @@ def compute_mmd_iw_numpy(arr1, arr2, arr1_weights, sigma_list=None):
     p1p2_weights_upper = np.triu(p1p2_weights)
     Kw_xx_upper = K_xx * p1p2_weights_upper
     Kw_xy = K_xy * p1_weights
+    pdb.set_trace()
 
     mmd = (np.sum(Kw_xx_upper) / num_combos_xx +
            np.sum(K_yy_upper) / num_combos_yy-
@@ -94,8 +95,9 @@ data_num = 10000
 data_dim = 2
 latent_dim = 10
 
-beta_params = [1] * latent_dim
-beta_params[0] = alpha
+beta_params_a = [1] * latent_dim
+beta_params_a[0] = alpha
+beta_params_b = [1] * latent_dim
 
 #############################################################
 # BUILD DATA SET
@@ -105,8 +107,7 @@ if data_set == 1:
     # Y ~ P  = Beta <-- Target, unthinned.
     # Weights = 1/M = P/(MP) = Beta/Unif = Beta
     latent = np.random.uniform(0, 1, size=(data_num, latent_dim))
-    latent_unthinned = np.random.uniform(0, 1, size=(data_num, latent_dim))
-    #latent_unthinned = np.random.beta(beta_params, beta_params, (data_num, latent_dim))
+    latent_unthinned = np.random.beta(beta_params_a, beta_params_b, (data_num, latent_dim))
     weights = vert(beta.pdf(latent[:, 0], alpha, 1.))
     weights_unthinned = vert(beta.pdf(latent_unthinned[:, 0], alpha, 1.))
 
@@ -127,25 +128,11 @@ elif data_set == 2:
     data = np.dot(latent, fixed_transform)
     data_unthinned = np.dot(latent_unthinned, fixed_transform)
 
-elif data_set == 3:
-    # X ~ MP = Beta <-- Observed, thinned.
-    # Y ~ P  = Unif <-- Target, unthinned.
-    # Weights = 1/M = P/(MP) = Unif/Beta = 1/Beta
-    latent = np.random.beta(beta_params, beta_params, (data_num, latent_dim))
-    latent_unthinned = np.random.uniform(0, 1, size=(data_num, latent_dim))
-    weights = vert(1. / beta.pdf(latent[:, 0], alpha, 1.))
-    weights_unthinned = vert(1. / beta.pdf(latent_unthinned[:, 0], alpha, 1.))
-
-    fixed_transform = np.random.normal(0, 1, size=(latent_dim, data_dim))
-    data = np.dot(latent, fixed_transform)
-    data_unthinned = np.dot(latent_unthinned, fixed_transform)
-
-
 
 
 #############################################################
 # DO COMPARISONS.
-num_batches = 1000
+num_batches = 100
 
 # mode = ['latent', 'transformed']
 mode = 'latent'
@@ -157,18 +144,10 @@ elif mode == 'transformed':
     observed = data
     target = data_unthinned
 
-# Compute MMD_iw(X, Y) over B baches of batch_size samples.
-mmd_iw = []
-for i in range(num_batches):
-    sample_indices = np.random.choice(data_num, batch_size)
-    sample_observed = observed[sample_indices]
-    sample_target = target[sample_indices]
-    sample_observed_weights = weights[sample_indices]
-    mmd_iw.append(
-        compute_mmd_iw_numpy(sample_observed, sample_target, sample_observed_weights))
   
 # Compute MMD_miw(X, Y) over B baches of batch_size samples.
 mmd = []
+mmd_iw = []
 mmd_miw = []
 for i in range(num_batches):
     sample_indices = np.random.choice(data_num, batch_size)
@@ -178,6 +157,8 @@ for i in range(num_batches):
 
     sample_mmd, _ = compute_mmd(sample_observed, sample_target)
     mmd.append(sample_mmd)
+    mmd_iw.append(
+        compute_mmd_iw_numpy(sample_observed, sample_target, sample_observed_weights))
     mmd_miw.append(
         compute_mmd_miw_numpy(sample_observed, sample_target, sample_observed_weights))
   
