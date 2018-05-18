@@ -6,6 +6,7 @@ import numpy as np
 import os
 import pdb
 from scipy.stats import beta
+from utils import compute_mmd
 
 
 parser = argparse.ArgumentParser()
@@ -74,7 +75,7 @@ def compute_mmd_iw_numpy(arr1, arr2, arr1_weights, sigma_list=None):
 
     mmd = (np.sum(Kw_xx_upper) / num_combos_xx +
            np.sum(K_yy_upper) / num_combos_yy-
-           2 * np.mean(K_xy))
+           2 * np.mean(Kw_xy))
     return mmd
 
 
@@ -102,7 +103,8 @@ if data_set == 1:
     # Y ~ P  = Beta <-- Target, unthinned.
     # Weights = 1/M = P/(MP) = Beta/Unif = Beta
     latent = np.random.uniform(0, 1, size=(data_num, latent_dim))
-    latent_unthinned = np.random.beta(beta_params, beta_params, (data_num, latent_dim))
+    latent_unthinned = np.random.uniform(0, 1, size=(data_num, latent_dim))
+    #latent_unthinned = np.random.beta(beta_params, beta_params, (data_num, latent_dim))
     weights = vert(beta.pdf(latent[:, 0], alpha, 1.))
     weights_unthinned = vert(beta.pdf(latent_unthinned[:, 0], alpha, 1.))
 
@@ -164,17 +166,21 @@ for i in range(num_batches):
         compute_mmd_iw_numpy(sample_observed, sample_target, sample_observed_weights))
   
 # Compute MMD_miw(X, Y) over B baches of batch_size samples.
+mmd = []
 mmd_miw = []
 for i in range(num_batches):
     sample_indices = np.random.choice(data_num, batch_size)
     sample_observed = observed[sample_indices]
     sample_target = target[sample_indices]
     sample_observed_weights = weights[sample_indices]
+
+    sample_mmd, _ = compute_mmd(sample_observed, sample_target)
+    mmd.append(sample_mmd)
     mmd_miw.append(
         compute_mmd_miw_numpy(sample_observed, sample_target, sample_observed_weights))
   
 plt.figure()
-plt.hist([mmd_iw, mmd_miw], bins=30, label=['iw', 'miw'])
+plt.hist([mmd, mmd_iw, mmd_miw], bins=30, label=['mmd', 'iw', 'miw'])
 plt.legend()
 plt.title('{}: {} batches of size {}, alpha={}'.format(
     data_mode, num_batches, batch_size, alpha))
