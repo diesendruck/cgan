@@ -11,6 +11,7 @@ layers = tf.layers
 
 from utils import get_data, generate_data, sample_data, compute_mmd
 from matplotlib.gridspec import GridSpec
+from scipy.stats import ks_2samp
 from tensorflow.examples.tutorials.mnist import input_data
 
 
@@ -36,9 +37,7 @@ h_dim = 10
 learning_rate = 1e-4
 log_iter = 1000
 log_dir = 'results/iwgan_{}'.format(tag)
-max_iter = 100000
-
-np.random.seed(123)
+max_iter = 10000
 
 
 # Load data.
@@ -270,9 +269,14 @@ for it in range(max_iter):
         z_sample_input = get_sample_z(n_sample, noise_dim)
         g_out = sess.run(g_sample, feed_dict={z_sample: z_sample_input})
         generated = np.array(g_out) * data_raw_std + data_raw_mean
+        # Compute MMD between simulations and unthinned (target) data.
         mmd_gen_vs_unthinned, _ = compute_mmd(
             generated[np.random.choice(n_sample, 500)],
             data_raw_unthinned[np.random.choice(data_num, 500)])
+        # Compute KSD between simulations and unthinned (target) data.
+        #ksd_gen_vs_unthinned, ksd_p = ks_2samp(
+        #    generated[np.random.choice(n_sample, 500)],
+        #    data_raw_unthinned[np.random.choice(data_num, 500)])
 
         if data_dim == 2:
             fig = plot(generated, data_raw, data_raw_unthinned, it,
