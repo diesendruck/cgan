@@ -16,7 +16,7 @@ declare -a model_names=('ce_iw' 'ce_sn' 'ce_miw' 'mmd_iw' 'mmd_sn' 'mmd_miw' 'cg
 # RUN the models.
 if [ "$1" == 'run' ]; then
   for model in "${model_names[@]}" ; do
-    bash run_short_panels.sh $model &
+    bash run_short_panel.sh $model &
   done
 fi
 
@@ -24,6 +24,6 @@ fi
 if [ "$1" == 'eval' ]; then
   # Run eval script for each model.
   for model in "${model_names[@]}" ; do
-    python eval_short_panels.py $model
+    python eval_short_panel.py $model
   done
 fi
