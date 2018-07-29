@@ -37,8 +37,8 @@ noise_dim = 10
 h_dim = 10
 learning_rate_init = 1e-4
 log_iter = 1000
-log_dir = 'results/mmdgan_{}'.format(tag)
-max_iter = 100000
+log_dir = 'results/mmd_{}'.format(tag)
+max_iter = 10000
 
 
 # Load data.

@@ -30,7 +30,7 @@ h_dim = 10
 learning_rate = 1e-4
 log_iter = 1000
 log_dir = 'results/upsample_{}'.format(tag)
-max_iter = 100000
+max_iter = 10000
 
 
 # Load data.

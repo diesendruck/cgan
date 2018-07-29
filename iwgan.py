@@ -36,7 +36,7 @@ noise_dim = 10
 h_dim = 10
 learning_rate = 1e-4
 log_iter = 1000
-log_dir = 'results/iwgan_{}'.format(tag)
+log_dir = 'results/ce_{}'.format(tag)
 max_iter = 10000
 
 
