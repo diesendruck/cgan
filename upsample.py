@@ -11,7 +11,9 @@ layers = tf.layers
 
 from matplotlib.gridspec import GridSpec
 from tensorflow.examples.tutorials.mnist import input_data
-from utils import get_data, generate_data, thinning_fn, sample_data, compute_mmd
+
+from mmd_utils import compute_mmd, compute_energy
+from utils import get_data, generate_data, thinning_fn, sample_data
 
 
 parser = argparse.ArgumentParser()
@@ -263,7 +265,12 @@ for it in range(max_iter):
         generated_normed = g_out
         generated = np.array(generated_normed) * data_raw_std + data_raw_mean
 
+        # Compute MMD between simulations and unthinned (target) data.
         mmd_gen_vs_unthinned, _ = compute_mmd(
+            generated[np.random.choice(n_sample, 500)],
+            data_raw_unthinned[np.random.choice(data_num_original, 500)])
+        # Compute energy between simulations and unthinned (target) data.
+        energy_gen_vs_unthinned = compute_energy(
             generated[np.random.choice(n_sample, 500)],
             data_raw_unthinned[np.random.choice(data_num_original, 500)])
 
@@ -283,5 +290,7 @@ for it in range(max_iter):
         print(data_raw[np.random.choice(data_num, 1), :5])
         print
         print(generated[:1, :5])
-        with open(os.path.join(log_dir, 'scores.txt'), 'a') as f:
+        with open(os.path.join(log_dir, 'scores_mmd.txt'), 'a') as f:
             f.write(str(mmd_gen_vs_unthinned)+'\n')
+        with open(os.path.join(log_dir, 'scores_energy.txt'), 'a') as f:
+            f.write(str(energy_gen_vs_unthinned)+'\n')

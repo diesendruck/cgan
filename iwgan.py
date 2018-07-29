@@ -6,13 +6,15 @@ import numpy as np
 import os
 import pdb
 import sys
+sys.path.append('/home/maurice/mmd')
 import tensorflow as tf
 layers = tf.layers
 
-from utils import get_data, generate_data, sample_data, compute_mmd
 from matplotlib.gridspec import GridSpec
-from scipy.stats import ks_2samp
 from tensorflow.examples.tutorials.mnist import input_data
+
+from mmd_utils import compute_mmd, compute_energy
+from utils import get_data, generate_data, sample_data
 
 
 parser = argparse.ArgumentParser()
@@ -265,7 +267,7 @@ for it in range(max_iter):
             fetch_dict)
 
     if it % log_iter == 0:
-        n_sample = 10000
+        n_sample = data_num 
         z_sample_input = get_sample_z(n_sample, noise_dim)
         g_out = sess.run(g_sample, feed_dict={z_sample: z_sample_input})
         generated = np.array(g_out) * data_raw_std + data_raw_mean
@@ -273,10 +275,10 @@ for it in range(max_iter):
         mmd_gen_vs_unthinned, _ = compute_mmd(
             generated[np.random.choice(n_sample, 500)],
             data_raw_unthinned[np.random.choice(data_num, 500)])
-        # Compute KSD between simulations and unthinned (target) data.
-        #ksd_gen_vs_unthinned, ksd_p = ks_2samp(
-        #    generated[np.random.choice(n_sample, 500)],
-        #    data_raw_unthinned[np.random.choice(data_num, 500)])
+        # Compute energy between simulations and unthinned (target) data.
+        energy_gen_vs_unthinned = compute_energy(
+            generated[np.random.choice(n_sample, 500)],
+            data_raw_unthinned[np.random.choice(data_num, 500)])
 
         if data_dim == 2:
             fig = plot(generated, data_raw, data_raw_unthinned, it,
@@ -294,5 +296,7 @@ for it in range(max_iter):
         print(data_raw[np.random.choice(data_num, 1), :5])
         print
         print(generated[:1, :5])
-        with open(os.path.join(log_dir, 'scores.txt'), 'a') as f:
+        with open(os.path.join(log_dir, 'scores_mmd.txt'), 'a') as f:
             f.write(str(mmd_gen_vs_unthinned)+'\n')
+        with open(os.path.join(log_dir, 'scores_energy.txt'), 'a') as f:
+            f.write(str(energy_gen_vs_unthinned)+'\n')

@@ -11,7 +11,9 @@ import tensorflow as tf
 layers = tf.layers
 
 from tensorflow.examples.tutorials.mnist import input_data
-from utils import get_data, generate_data, thinning_fn, sample_data, compute_mmd 
+
+from mmd_utils import compute_mmd, compute_energy
+from utils import get_data, generate_data, thinning_fn, sample_data
 
 
 parser = argparse.ArgumentParser()
@@ -269,6 +271,10 @@ for it in range(max_iter):
         mmd_gen_vs_unthinned, _ = compute_mmd(
             generated[np.random.choice(n_sample, 500), -data_dim:],
             data_raw_unthinned[np.random.choice(data_num, 500), -data_dim:])
+        # Compute energy only between data dimensions, and not latent ones.
+        energy_gen_vs_unthinned = compute_energy(
+            generated[np.random.choice(n_sample, 500), -data_dim:],
+            data_raw_unthinned[np.random.choice(data_num, 500), -data_dim:])
 
         if data_dim == 2:
             fig = plot(generated, data_raw, data_raw_unthinned, it,
@@ -286,5 +292,7 @@ for it in range(max_iter):
         print(data_raw[np.random.choice(data_num, 1), :5])
         print
         print(generated[:1, :5])
-        with open(os.path.join(log_dir, 'scores.txt'), 'a') as f:
+        with open(os.path.join(log_dir, 'scores_mmd.txt'), 'a') as f:
             f.write(str(mmd_gen_vs_unthinned)+'\n')
+        with open(os.path.join(log_dir, 'scores_energy.txt'), 'a') as f:
+            f.write(str(energy_gen_vs_unthinned)+'\n')
