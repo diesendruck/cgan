@@ -6,12 +6,14 @@ import numpy as np
 import os
 import pdb
 import sys
+sys.path.append('/home/maurice/mmd')
 import tensorflow as tf
 layers = tf.layers
 
 from matplotlib.gridspec import GridSpec
 from tensorflow.examples.tutorials.mnist import input_data
 
+from kl_estimators import naive_estimator as compute_kl
 from mmd_utils import compute_mmd, compute_energy
 from utils import get_data, generate_data, thinning_fn, sample_data
 
@@ -36,7 +38,7 @@ h_dim = 10
 learning_rate = 1e-4
 log_iter = 1000
 log_dir = 'results/ce_{}'.format(tag)
-max_iter = 10000
+max_iter = 25000
 
 
 # Load data.
@@ -285,6 +287,10 @@ for it in range(max_iter):
         energy_gen_vs_unthinned = compute_energy(
             generated[np.random.choice(n_sample, 500)],
             data_raw_unthinned[np.random.choice(data_num, 500)])
+        # Compute KL between simulations and unthinned (target) data.
+        kl_gen_vs_unthinned = compute_kl(
+            generated[np.random.choice(n_sample, 500)],
+            data_raw_unthinned[np.random.choice(data_num, 500)], k=5)
 
         if data_dim == 2:
             fig = plot(generated, data_raw, data_raw_unthinned, it,
@@ -306,3 +312,5 @@ for it in range(max_iter):
             f.write(str(mmd_gen_vs_unthinned)+'\n')
         with open(os.path.join(log_dir, 'scores_energy.txt'), 'a') as f:
             f.write(str(energy_gen_vs_unthinned)+'\n')
+        with open(os.path.join(log_dir, 'scores_kl.txt'), 'a') as f:
+            f.write(str(kl_gen_vs_unthinned)+'\n')
