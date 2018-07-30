@@ -284,7 +284,6 @@ for it in range(max_iter):
         kl_gen_vs_unthinned = compute_kl(
             generated[np.random.choice(n_sample, 500)],
             data_raw_unthinned[np.random.choice(data_num, 500)], k=5)
-        print(kl_gen_vs_unthinned)
 
         if data_dim == 2:
             fig = plot(generated, data_raw, data_raw_unthinned, it,
