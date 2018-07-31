@@ -19,39 +19,41 @@ import sys
 
 model_name = sys.argv[1]
 base_path = '/home/maurice/iwgn_multivariate/results'
-model_trials = [d for d in os.listdir(base_path) if model_name in d]
+model_run_names = [n for n in os.listdir(base_path) if model_name in n]
 
 FIXED_DIM_CHOICES = [2, 4, 10]  # Defined by generative scripts.
 
 print('Results: {}'.format(model_name))
 for dim in FIXED_DIM_CHOICES:
-    model_with_dim = '{}_dim{}'.format(model_name, dim)
-    # Fetch only trial runs for that model and dim.
-    # e.g. checking if "ce_iw_dim2" in "ce_iw_dim2_run5"
-    trials = [trial for trial in model_trials if model_with_dim in trial]
-    mmd_means = []
-    energy_means = []
-    kl_means = []
-    for trial in trials:
+    model_dim_combo = '{}_dim{}'.format(model_name, dim)
+    # Fetch only runs for that model and dim.
+    # e.g. checking if the identifier "ce_iw_dim2" is in "ce_iw_dim2_run5".
+    runs = [name for name in model_run_names if model_dim_combo in name]
+    mmd_run_means = []
+    energy_run_means = []
+    kl_run_means = []
+    for run in runs:
+        tail = 5
         # Fetch and store MMD results.
-        scores_all = np.loadtxt(os.path.join(base_path, trial, 'scores_mmd.txt'))
-        scores_not_nan = scores_all[~np.isnan(scores_all)]
-        scores = scores_not_nan[-10:]
-        mmd_means.append(np.mean(scores))
+        mmd_run_scores_all = np.loadtxt(os.path.join(base_path, run, 'scores_mmd.txt'))
+        mmd_run_scores_not_nan = mmd_run_scores_all[~np.isnan(mmd_run_scores_all)]
+        mmd_run_scores = mmd_run_scores_not_nan[-10:]
+        mmd_run_means.append(np.mean(mmd_run_scores))
         # Fetch and store energy results.
-        scores_all = np.loadtxt(os.path.join(base_path, trial, 'scores_energy.txt'))
-        scores_not_nan = scores_all[~np.isnan(scores_all)]
-        scores = scores_not_nan[-10:]
-        energy_means.append(np.mean(scores))
+        energy_run_scores_all = np.loadtxt(os.path.join(base_path, run, 'scores_energy.txt'))
+        energy_run_scores_not_nan = energy_run_scores_all[~np.isnan(energy_run_scores_all)]
+        energy_run_scores = energy_run_scores_not_nan[-tail:]
+        energy_run_means.append(np.mean(energy_run_scores))
         # Fetch and store KL results.
-        scores_all = np.loadtxt(os.path.join(base_path, trial, 'scores_kl.txt'))
-        scores_not_nan = scores_all[~np.isnan(scores_all)]
-        scores = scores_not_nan[-10:]
-        kl_means.append(np.mean(scores))
+        kl_run_scores_all = np.loadtxt(os.path.join(base_path, run, 'scores_kl.txt'))
+        kl_run_scores_not_nan = kl_run_scores_all[~np.isnan(kl_run_scores_all)]
+        kl_run_scores = kl_run_scores_not_nan[-tail:]
+        kl_run_means.append(np.mean(kl_run_scores))
 
     # Print summary statistic for the multiple runs of each experiment.
-    print('  {}: MMD {:.4f} +- {:.4f},  E: {:.4f} +- {:.4f},  KL: {:.4f} +- {:.4f}'.format(
-        model_with_dim, np.mean(mmd_means), np.std(mmd_means),
-        np.mean(energy_means), np.std(energy_means),
-        np.mean(kl_means), np.std(kl_means)))
+    print('  {} (n={}): MMD {:.4f} +- {:.4f},  E: {:.4f} +- {:.4f},  KL: {:.4f} +- {:.4f}'.format(
+        model_dim_combo, len(mmd_run_means),
+        np.mean(mmd_run_means), np.std(mmd_run_means),
+        np.mean(energy_run_means), np.std(energy_run_means),
+        np.mean(kl_run_means), np.std(kl_run_means)))
 print

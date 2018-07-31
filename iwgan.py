@@ -294,6 +294,7 @@ for it in range(max_iter):
 
         # Print diagnostics.
         print("#################")
+        print('ce_{}'.format(tag))
         print('Iter: {}, lr={}'.format(it, learning_rate))
         print('  d_loss: {:.4}'.format(d_loss_))
         print('  g_loss: {:.4}'.format(g_loss_))

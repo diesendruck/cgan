@@ -291,6 +291,7 @@ for it in range(max_iter):
 
         # Print diagnostics.
         print("#################")
+        print('cgan_{}'.format(tag))
         print('Iter: {}'.format(it))
         print('  d_loss: {:.4}'.format(d_loss_))
         print('  g_loss: {:.4}'.format(g_loss_))

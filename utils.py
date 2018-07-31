@@ -17,7 +17,7 @@ def one_time_data_setup():
     if not os.path.exists('data'):
         os.makedirs('data')
 
-    def make_files(n, data_dim, latent_dim, with_latents, m_weight):
+    def _make_files(n, data_dim, latent_dim, with_latents, m_weight):
         (data_raw, data_raw_weights,
          data_raw_unthinned, data_raw_unthinned_weights,
          data_normed, data_raw_mean, data_raw_std) = generate_data(
@@ -42,44 +42,40 @@ def one_time_data_setup():
     latent_dim = 10
     with_latents = True
     m_weight = 5.  # NOTE: THIS MUST AGREE WITH THE THINNING_FN DEFINITION!
-    make_files(n, 2, latent_dim, with_latents, m_weight)
-    make_files(n, 4, latent_dim, with_latents, m_weight)
-    make_files(n, 10, latent_dim, with_latents, m_weight)
 
+    # Make the files and store them in the "data" subdirectory.
+    _make_files(n, 2, latent_dim, with_latents=True, m_weight=m_weight)
+    _make_files(n, 4, latent_dim, with_latents=True, m_weight=m_weight)
+    _make_files(n, 10, latent_dim, with_latents=True, m_weight=m_weight)
 
-def get_data(data_dim, with_latents=False):
-    if with_latents:
-        prepended = 'with_latents_{}d'.format(data_dim)
-    else:
-        prepended = '{}d'.format(data_dim)
-    data_raw = np.load('data/{}_data_raw.npy'.format(prepended))
-    data_raw_weights = np.load('data/{}_data_raw_weights.npy'.format(prepended))
-    data_raw_unthinned = np.load('data/{}_data_raw_unthinned.npy'.format(prepended))
-    data_raw_unthinned_weights = np.load('data/{}_data_raw_unthinned_weights.npy'.format(prepended))
-    data_normed = np.load('data/{}_data_normed.npy'.format(prepended))
-    data_raw_mean = np.load('data/{}_data_raw_mean.npy'.format(prepended))
-    data_raw_std = np.load('data/{}_data_raw_std.npy'.format(prepended))
-    return (data_raw, data_raw_weights,
-            data_raw_unthinned, data_raw_unthinned_weights,
-            data_normed, data_raw_mean, data_raw_std)
+    print('Data generation complete. COMMENT OUT "one_time_data_setup()" in '
+          'utils.py before proceeding to training.')
 
 
 def generate_data(data_num, data_dim, latent_dim, with_latents=False, m_weight=1):
-    def gen_2d(n):
-        fixed_transform = np.random.normal(0, 1, size=(latent_dim, data_dim))
-
+    def _gen_2d(n):
+        print('Making {}d data with uniform/thinning_fn.'.format(data_dim))
+        ##################################################################
+        # Sample unthinned data, as Uniform latents with Normal transform.
         data_raw_unthinned = np.zeros((n, data_dim))
         data_raw_unthinned_latents = np.zeros((n, latent_dim))
         data_raw_unthinned_weights = np.zeros((n, 1))
+        fixed_transform = np.random.normal(0, 1, size=(latent_dim, data_dim))
         for i in range(n):
+            # Sample a latent uniform variable.
+            # Apply the Normal transform.
+            # Compute weight, based on 0th index of latent.
             rand_latent = np.random.uniform(0, 1, latent_dim)
             rand_transformed = np.dot(rand_latent, fixed_transform)
+            latent_weight = 1. / thinning_fn(rand_latent, is_tf=False, m_weight=m_weight)
+            # Store results.
             data_raw_unthinned[i] = rand_transformed
             data_raw_unthinned_latents[i] = rand_latent
-
-            latent_weight = 1. / thinning_fn(rand_latent, is_tf=False, m_weight=m_weight)
             data_raw_unthinned_weights[i] = latent_weight
 
+        ##################################################################
+        # Sample raw data (thinned), starting with Uniform draw, and accepting
+        #   with probability according to thinning function.
         data_raw = np.zeros((n, data_dim))
         data_raw_latents = np.zeros((n, latent_dim))
         data_raw_weights = np.zeros((n, 1))
@@ -89,11 +85,16 @@ def generate_data(data_num, data_dim, latent_dim, with_latents=False, m_weight=1
             thinning_value = thinning_fn(rand_latent, is_tf=False, m_weight=1.)  # Strictly T, not M.
             to_use = np.random.binomial(1, thinning_value)
             if to_use:
+                # Point was included.
                 rand_transformed = np.dot(rand_latent, fixed_transform)
+
+                # TODO: Should this be 1 / t(x)?
+                #latent_weight = thinning_fn(rand_latent, is_tf=False, m_weight=m_weight)
+                latent_weight = 1. / thinning_fn(rand_latent, is_tf=False, m_weight=m_weight)
+
+                # Add the point to the collection.
                 data_raw[count] = rand_transformed
                 data_raw_latents[count] = rand_latent
-
-                latent_weight = thinning_fn(rand_latent, is_tf=False, m_weight=m_weight)
                 data_raw_weights[count] = latent_weight
                 count += 1
 
@@ -104,7 +105,8 @@ def generate_data(data_num, data_dim, latent_dim, with_latents=False, m_weight=1
 
         return data_raw, data_raw_weights, data_raw_unthinned, data_raw_unthinned_weights
 
-    def gen_beta_2d(data_num):
+    def _gen_beta_2d(n):
+        print('Making {}d data with beta/1-over-beta.'.format(data_dim))
         alpha = 0.001
         beta_params = [1] * latent_dim
         beta_params[0] = alpha
@@ -125,15 +127,17 @@ def generate_data(data_num, data_dim, latent_dim, with_latents=False, m_weight=1
 
         return data, weights, data_unthinned, weights_unthinned 
 
-    #(data_raw,
-    # data_raw_weights,
-    # data_raw_unthinned,
-    # data_raw_unthinned_weights) = gen_2d(n)
-    (data_raw,
-     data_raw_weights,
-     data_raw_unthinned,
-     data_raw_unthinned_weights) = gen_beta_2d(data_num)
-
+    beta_thinning = False
+    if beta_thinning:
+        (data_raw,
+         data_raw_weights,
+         data_raw_unthinned,
+         data_raw_unthinned_weights) = _gen_beta_2d(data_num)
+    else:
+        (data_raw,
+         data_raw_weights,
+         data_raw_unthinned,
+         data_raw_unthinned_weights) = _gen_2d(data_num)
 
     data_raw_mean = np.mean(data_raw, axis=0)
     data_raw_std = np.std(data_raw, axis=0)
@@ -148,13 +152,32 @@ def thinning_fn(inputs, is_tf=True, m_weight=1):
     """Thinning on zero'th index of input."""
     eps = 1e-10
     if is_tf:
-        return m_weight * inputs[0] ** 4 + eps
+        # NOTE: THIS MUST AGREE WITH THE m_weight!
+        #   e.g. For this to integrate to 1 on [0,1], m_weight = 5.
+        return m_weight * inputs[0] ** 4 + eps  
     else:
         return m_weight * inputs[0] ** 4 + eps
 
 
 def vert(arr):
     return np.reshape(arr, [-1, 1])
+
+
+def get_data(data_dim, with_latents=False):
+    if with_latents:
+        prepended = 'with_latents_{}d'.format(data_dim)
+    else:
+        prepended = '{}d'.format(data_dim)
+    data_raw = np.load('data/{}_data_raw.npy'.format(prepended))
+    data_raw_weights = np.load('data/{}_data_raw_weights.npy'.format(prepended))
+    data_raw_unthinned = np.load('data/{}_data_raw_unthinned.npy'.format(prepended))
+    data_raw_unthinned_weights = np.load('data/{}_data_raw_unthinned_weights.npy'.format(prepended))
+    data_normed = np.load('data/{}_data_normed.npy'.format(prepended))
+    data_raw_mean = np.load('data/{}_data_raw_mean.npy'.format(prepended))
+    data_raw_std = np.load('data/{}_data_raw_std.npy'.format(prepended))
+    return (data_raw, data_raw_weights,
+            data_raw_unthinned, data_raw_unthinned_weights,
+            data_normed, data_raw_mean, data_raw_std)
 
 
 def sample_data(data, data_weights, batch_size):
@@ -164,8 +187,9 @@ def sample_data(data, data_weights, batch_size):
     return batch_data, batch_weights
 
 
+"""
 def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False):
-    """Computes mmd between two numpy arrays of same size."""
+    #Computes mmd between two numpy arrays of same size.
     if sigma_list is None:
         sigma_list = [0.1, 1.0, 10.0]
 
@@ -218,7 +242,7 @@ def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False):
                np.sum(K_yy_upper) / num_combos_y -
                2 * np.sum(K_xy) / (n1 * n2))
         return mmd, exp_object
-
+"""
 
 # NOTE: The following must be commented out after data generation, before 
 #   training any models.

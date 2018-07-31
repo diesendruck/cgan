@@ -332,6 +332,7 @@ for it in range(max_iter):
         # Print diagnostics.
         print("#################")
         lr_ = sess.run(lr)
+        print('mmd_{}'.format(tag))
         print('Iter: {}, lr={:.4f}'.format(it, lr_))
         print('  g_loss: {:.4}'.format(g_loss_))
         print('  mmd_gen_vs_unthinned: {:.4}'.format(mmd_gen_vs_unthinned))
