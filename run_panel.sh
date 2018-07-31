@@ -18,12 +18,12 @@ if [ "$1" == 'run' ]; then
   for model in "${model_names[@]}" ; do
     bash run_short_panel.sh $model &
   done
-fi
-
 # EVAL the models.
-if [ "$1" == 'eval' ]; then
+elif [ "$1" == 'eval' ]; then
   # Run eval script for each model.
   for model in "${model_names[@]}" ; do
     python eval_short_panel.py $model
   done
+else
+  echo "To run, add either the 'run' or 'eval' argument."
 fi
